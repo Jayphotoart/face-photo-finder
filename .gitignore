@@ -1,0 +1,87 @@
+# =========================
+# Python Virtual Environment
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# Python Cache
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =========================
+# Temporary Files / Folders
+# =========================
+temp_files/
+temp_crops/
+tmp/
+*.tmp
+
+# =========================
+# Customer / Event Data
+# =========================
+events/
+uploads/
+photos/
+faces/
+Saved Pictures/
+images_old_backup/
+
+# =========================
+# InsightFace Models
+# =========================
+insightface_models/
+
+# =========================
+# Face Embeddings / FAISS Data
+# =========================
+*.faiss
+*.npy
+*.pkl
+
+embeddings/
+
+# =========================
+# Database / Local Data
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Test / Benchmark Data
+# =========================
+benchmark_results.csv
+batch_results.txt
+
+# =========================
+# JSON Test / Generated Data
+# =========================
+temp_newtest_data.json
+fresh_labels.json
+fresh_similarity_summary.json
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+.streamlit/secrets.toml
+
+# =========================
+# Google OAuth / Credentials
+# =========================
+credentials.json
+client_secret.json
+service_account.json
+token.pickle
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
