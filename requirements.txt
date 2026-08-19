@@ -1,11 +1,10 @@
 streamlit
 opencv-python-headless
-numpy>=1.26.4
-insightface==0.7.3
+numpy<2.0.0
+insightface
 onnxruntime
-qrcode[pil]
-pandas
 faiss-cpu
-requests
-google-api-python-client
+qrcode[pil]
+google-auth
 google-auth-oauthlib
+google-api-python-client
