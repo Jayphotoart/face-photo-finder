@@ -467,7 +467,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     event_path, photos_path = get_event_dir(selected_event)
                     # આગળનું ફોટો સેવ અને ફેસ ડિટેક્શનનું લોજિક...
                     # 2. હવે જ ફોલ્ડર ID મેળવો
-                    folder_id = get_drive_folder_id(selected_event.strip())
+                    event_path, photos_path = get_event_dir(selected_event.strip())
                     if folder_id is None:
                         st.error("❌ Drive પર ફોલ્ડર મળ્યું નહીં. કૃપા કરીને ઇવેન્ટ ફરી બનાવો.")
                         st.stop()
@@ -505,7 +505,10 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     # ડ્રાઈવ પર અપલોડ
                     file_ext = os.path.splitext(file.name)[1]
                     unique_name = f"{hashlib.md5(file.name.encode() + str(datetime.datetime.now()).encode()).hexdigest()[:10]}{file_ext}"
-                    drive_file_id = upload_to_drive(tmp_path, folder_id)
+                    # લૂપની અંદર:
+                    file_path = os.path.join(photos_path, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
                     
                     if drive_file_id is None:
                         st.error(f"❌ {file.name} Drive પર અપલોડ થયો નહીં!")
