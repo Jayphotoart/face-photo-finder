@@ -429,17 +429,16 @@ if option == "📂 ઇવેન્ટ મેનેજ":
         if st.button("📌 ઇવેન્ટ બનાવો", key="create_event"):
             st.write("🔍 DEBUG: Button clicked!")
             if new_event.strip() and event_password.strip():
-                folder_id = get_drive_folder_id(new_event.strip())   # .strip() ઉમેરો
-                if folder_id is None:
-                    st.error("❌ ફોલ્ડર બનાવી શકાયું નહીં.")
-                else:
-                    event_data = {"password": event_password, "faces": []}
-                    success = save_event_data(new_event.strip(), event_data, folder_id)
-                    if success:
-                        st.success(f"✅ '{new_event}' ઇવેન્ટ Drive પર સફળતાપૂર્વક બની!")
-                        st.rerun()
+                event_name = new_event.strip()
+                if event_name:
+                    event_path, photos_path = get_event_dir(event_name)
+                    
+                    # નવી ઇવેન્ટ માટે ખાલી ડેટા ફાઇલ બનાવો
+                    initial_data = {"password": event_password, "faces": []}
+                    if save_event_data_local(event_name, initial_data):
+                        st.success(f"✅ ઇવેન્ટ '{event_name}' સફળતાપૂર્વક બની ગઈ!")
                     else:
-                        st.error("❌ ઇવેન્ટ સેવ કરતી વખતે ભૂલ આવી.")
+                        st.error("❌ ઇવેન્ટ બનાવવામાં ભૂલ આવી.")
             else:
                 st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
 
