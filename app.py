@@ -578,7 +578,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     progress_bar.progress((i + 1) / total_files)
                 
                 # ઓટો-મેચ થયેલા ચહેરાઓ ડ્રાઈવ/ડેટાબેઝમાં અપડેટ કરો
-                if auto_saved_count > 0:
+                if processed_count > 0:
                     event_data["faces"] = existing_faces
                     save_event_data(selected_event, event_data, folder_id)
                     st.info(f"✨ {auto_saved_count} ચહેરાઓ આપોઆપ ઓળખાઈને સેવ થઈ ગયા!")
