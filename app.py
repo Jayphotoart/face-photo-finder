@@ -44,189 +44,51 @@ st.set_page_config(
 )
 
 # ============================================================
-# GOOGLE DRIVE INTEGRATION
+# LOCAL STORAGE SYSTEM (Streamlit Server Storage)
 # ============================================================
-import pickle
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
 import os
+import json
 
-# ... બાકીનો કોડ ...
+BASE_STORAGE_DIR = "events_data"
+os.makedirs(BASE_STORAGE_DIR, exist_ok=True)
 
-from google.oauth2 import service_account   # આ ટોચ પર ઉમેરો
+def get_event_dir(event_name):
+    """ઇવેન્ટ માટે લોકલ ફોલ્ડર બનાવે છે"""
+    event_path = os.path.join(BASE_STORAGE_DIR, event_name)
+    photos_path = os.path.join(event_path, "photos")
+    os.makedirs(photos_path, exist_ok=True)
+    return event_path, photos_path
 
-from google.oauth2 import service_account   # ટોચ પર આ ઇમ્પોર્ટ ઉમેરો
-
-def get_drive_service():
-    """Service Account (Cloud) અથવા OAuth (લોકલ) વાપરો"""
-    
-    # 1️⃣ પહેલાં Service Account અજમાવો (Cloud માટે)
+def save_event_data_local(event_name, data):
+    """ઇવેન્ટનો ડેટા અને ફેસ એમ્બેડિંગ્સ JSON માં સેવ કરે છે"""
     try:
-        service_account_info = dict(st.secrets["gcp_service_account"])
-        creds = service_account.Credentials.from_service_account_info(
-            service_account_info,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        return build('drive', 'v3', credentials=creds)
-    except Exception:
-        # Service Account ન ચાલે તો OAuth અજમાવો (ફક્ત લોકલ માટે)
-        pass
-    
-    # 2️⃣ OAuth 2.0 (લોકલ માટે - token.pickle)
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-        else:
-            # 🔥 આ ભાગ ફક્ત લોકલ માટે જ ચાલશે
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json',
-                scopes=['https://www.googleapis.com/auth/drive.file']
-            )
-            creds = flow.run_local_server(port=0)
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-    
-    return build('drive', 'v3', credentials=creds)
-
-ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8-"
-
-def get_drive_folder_id(event_name):
-    try:
-        drive_service = get_drive_service()
-        
-        # ROOT_FOLDER_ID ની અંદર ઇવેન્ટનું ફોલ્ડર શોધો
-        query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
-        results = drive_service.files().list(
-            q=query, 
-            spaces='drive', 
-            fields='files(id, name)', 
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        items = results.get('files', [])
-        
-        if items:
-            return items[0]['id']
-        else:
-            # જો ન હોય તો ROOT_FOLDER_ID ની અંદર નવું ફોલ્ડર બનાવો
-            folder_metadata = {
-                'name': event_name,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [ROOT_FOLDER_ID]
-            }
-            folder = drive_service.files().create(
-                body=folder_metadata, 
-                fields='id', 
-                supportsAllDrives=True
-            ).execute()
-            return folder.get('id')
-            
-    except Exception as e:
-        st.error(f"❌ Google Drive API Error: {e}")
-        return None
-
-from googleapiclient.http import MediaFileUpload
-
-def upload_to_drive(file_path, folder_id):
-    try:
-        drive_service = get_drive_service()
-        file_metadata = {
-            'name': os.path.basename(file_path),
-            'parents': [folder_id]  # શેર કરેલા ઇવેન્ટ ફોલ્ડરમાં જ સેવ થશે
-        }
-        
-        media = MediaFileUpload(file_path, resumable=True)
-        
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id',
-            supportsAllDrives=True  # Shared Folders સપોર્ટ માટે
-        ).execute()
-        
-        return file.get('id')
-    except Exception as e:
-        st.error(f"Google Drive upload error: {e}")
-        return None
-
-def load_event_data_from_drive(event_name):
-    """Google Drive પરથી ઇવેન્ટનું data.json વાંચો"""
-    try:
-        drive_service = get_drive_service()
-        folder_id = get_drive_folder_id(event_name)
-        query = f"name='data.json' and '{folder_id}' in parents and trashed=false"
-        results = drive_service.files().list(q=query, fields="files(id)").execute()
-        files = results.get('files', [])
-        if not files:
-            return {"password": "", "faces": []}
-        file_id = files[0]['id']
-        request = drive_service.files().get_media(fileId=file_id)
-        file_content = request.execute()
-        data = json.loads(file_content.decode('utf-8'))
-        if isinstance(data, list):
-            data = {"password": "", "faces": data}
-        for face in data.get("faces", []):
-            if "embedding" in face and isinstance(face["embedding"], str):
-                try:
-                    face["embedding"] = json.loads(face["embedding"])
-                except:
-                    face["embedding"] = []
-        return data
-    except Exception as e:
-        return {"password": "", "faces": []}
-
-def save_event_data_to_drive(event_name, data, folder_id):
-    try:
-        drive_service = get_drive_service()
-        filename = f"{event_name}_data.json"
-        
-        # પહેલા જૂની JSON ફાઇલ શોધો
-        query = f"name = '{filename}' and '{folder_id}' in parents and trashed = false"
-        results = drive_service.files().list(
-            q=query,
-            spaces='drive',
-            fields='files(id)',
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        files = results.get('files', [])
-        
-        json_str = json.dumps(data, indent=2, ensure_ascii=False)
-        media = MediaInMemoryUpload(json_str.encode('utf-8'), mimetype='application/json', resumable=True)
-        
-        if files:
-            # જો ફાઇલ પહેલેથી હોય તો અપડેટ કરો
-            file_id = files[0]['id']
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=media,
-                supportsAllDrives=True
-            ).execute()
-        else:
-            # જો નવી ફાઇલ હોય તો folder_id ની અંદર બનાવો
-            file_metadata = {
-                'name': filename,
-                'parents': [folder_id]
-            }
-            drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id',
-                supportsAllDrives=True
-            ).execute()
-            
+        event_path, _ = get_event_dir(event_name)
+        data_file = os.path.join(event_path, f"{event_name}_data.json")
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        st.error(f"❌ ઇવેન્ટ સેવ કરતી વખતે ભૂલ આવી: {e}")
+        st.error(f"❌ ડેટા સેવ કરતી વખતે ભૂલ: {e}")
         return False
+
+def load_event_data_local(event_name):
+    """ઇવેન્ટનો ડેટા લોડ કરે છે"""
+    try:
+        event_path, _ = get_event_dir(event_name)
+        data_file = os.path.join(event_path, f"{event_name}_data.json")
+        if os.path.exists(data_file):
+            with open(data_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {"password": "", "faces": []}
+    except Exception as e:
+        st.error(f"❌ ડેટા લોડ કરતી વખતે ભૂલ: {e}")
+        return {"password": "", "faces": []}
+
+def list_all_local_events():
+    """બધી ઉપલબ્ધ ઇવેન્ટ્સનું લિસ્ટ મેળવે છે"""
+    if not os.path.exists(BASE_STORAGE_DIR):
+        return []
+    return [d for d in os.listdir(BASE_STORAGE_DIR) if os.path.isdir(os.path.join(BASE_STORAGE_DIR, d))]
 
 # ============================================================
 # HELPER FUNCTIONS (Events)
