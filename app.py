@@ -133,12 +133,14 @@ def get_drive_folder_id(event_name):
         st.error(f"❌ Google Drive API Error: {e}")
         return None
 
+from googleapiclient.http import MediaFileUpload
+
 def upload_to_drive(file_path, folder_id):
     try:
         drive_service = get_drive_service()
         file_metadata = {
             'name': os.path.basename(file_path),
-            'parents': [folder_id]  # શેર કરેલા ફોલ્ડરની અંદર જ ફાઇલ બનશે
+            'parents': [folder_id]  # શેર કરેલા ઇવેન્ટ ફોલ્ડરમાં જ સેવ થશે
         }
         
         media = MediaFileUpload(file_path, resumable=True)
@@ -147,7 +149,7 @@ def upload_to_drive(file_path, folder_id):
             body=file_metadata,
             media_body=media,
             fields='id',
-            supportsAllDrives=True  # Shared Drive / Folders સપોર્ટ માટે
+            supportsAllDrives=True  # Shared Folders સપોર્ટ માટે
         ).execute()
         
         return file.get('id')
