@@ -148,26 +148,33 @@ if option == "📂 ઇવેન્ટ મેનેજ":
     st.subheader("📂 ઇવેન્ટ મેનેજમેન્ટ (Google Drive)")
     service = get_drive_service()
     
-    with st.expander("➕ નવી ઇવેન્ટ બનાવો", expanded=False):
+with st.expander("➕ નવી ઇવેન્ટ બનાવો", expanded=False):
         new_event = st.text_input("ઇવેન્ટનું નામ (દા.ત., sharma_wedding)")
         event_password = st.text_input("🔒 ઇવેન્ટ પાસવર્ડ (ગ્રાહકો માટે)", type="password")
         
         if st.button("📌 ઇવેન્ટ બનાવો"):
-            if new_event.strip() and event_password.strip() and service:
-                clean_name = new_event.strip().replace(" ", "_")
-                
-                # ૧. ડ્રાઇવમાં મેઈન ફોલ્ડર બનાવો
-                root_id = get_or_create_drive_folder(service, "JayPhotoShodh_Events")
-                # ૨. તેની અંદર ઇવેન્ટનું ફોલ્ડર બનાવો
-                event_folder_id = get_or_create_drive_folder(service, clean_name, root_id)
-                
-                initial_data = {"password": event_password.strip(), "faces": [], "drive_folder_id": event_folder_id}
-                save_event_data_local(clean_name, initial_data)
-                
-                st.success(f"✅ ઇવેન્ટ '{clean_name}' સફળતાપૂર્વક Drive પર બની ગઈ!")
-                st.rerun()
+            if new_event.strip() and event_password.strip():
+                if service:
+                    try:
+                        clean_name = new_event.strip().replace(" ", "_")
+                        
+                        # ૧. ડ્રાઇવમાં મેઈન ફોલ્ડર બનાવો
+                        root_id = get_or_create_drive_folder(service, "JayPhotoShodh_Events")
+                        # ૨. તેની અંદર ઇવેન્ટનું ફોલ્ડર બનાવો
+                        event_folder_id = get_or_create_drive_folder(service, clean_name, root_id)
+                        
+                        initial_data = {"password": event_password.strip(), "faces": [], "drive_folder_id": event_folder_id}
+                        save_event_data_local(clean_name, initial_data)
+                        
+                        st.success(f"✅ ઇવેન્ટ '{clean_name}' સફળતાપૂર્વક Drive પર બની ગઈ!")
+                        # નોંધ: અહીંથી st.rerun() કાઢી નાખ્યું છે જેથી એરર ગાયબ ન થાય.
+                    except Exception as e:
+                        # જો કોઈ એરર આવશે તો અહીં સ્ક્રીન પર રોકાઈ જશે!
+                        st.error(f"❌ ઇવેન્ટ બનાવતી વખતે ભૂલ આવી: {e}")
+                else:
+                    st.error("❌ Google Drive કનેક્ટ નથી. Secrets ફાઈલ ચેક કરો.")
             else:
-                st.error("❌ નામ, પાસવર્ડ ભરો અને ખાતરી કરો કે Drive કનેક્ટ છે.")
+                st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
 
     available_events = list_all_local_events()
 
