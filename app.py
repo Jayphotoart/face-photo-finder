@@ -96,7 +96,7 @@ def get_drive_service():
     
     return build('drive', 'v3', credentials=creds)
 
-ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8"
+ROOT_FOLDER_ID = "1B-qd1ZtJkQfxIUzpUCxdvaVIMAkVQtqH"
 
 def get_drive_folder_id(event_name):
     try:
