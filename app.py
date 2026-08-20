@@ -452,7 +452,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
         # ઇવેન્ટ સિલેક્ટ કરવાનો ડ્રોપડાઉન
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         
-if selected_event:
+        if selected_event:
             st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
             
             # ફોટો અપલોડ બટન
@@ -521,6 +521,8 @@ if selected_event:
                     status_text.empty()
                     st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
                     st.rerun()
+                    
+                    # ડ્રાઈવ પર અપલોડ
                     file_ext = os.path.splitext(file.name)[1]
                     unique_name = f"{hashlib.md5(file.name.encode() + str(datetime.datetime.now()).encode()).hexdigest()[:10]}{file_ext}"
                     # લૂપની અંદર:
