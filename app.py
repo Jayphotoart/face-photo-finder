@@ -105,10 +105,10 @@ def get_events_list():
         return []
 
 def load_event_data(event_name):
-    return load_event_data_from_drive(event_name)
+    return load_event_data_local(event_name)
 
-def save_event_data(event_name, data, folder_id):
-    return save_event_data_to_drive(event_name, data, folder_id)
+def save_event_data(event_name, data):
+    return save_event_data_local(event_name, data)
 
 # ============================================================
 # ANALYTICS
