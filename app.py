@@ -66,7 +66,7 @@ def get_or_create_drive_folder(service, folder_name, parent_id=None):
 def upload_to_drive(service, file_path, file_name, folder_id, mime_type='image/jpeg'):
     """ફાઈલને ડ્રાઈવમાં અપલોડ કરશે."""
     file_metadata = {'name': file_name, 'parents': [folder_id]}
-    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
+    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)  # અહી False કર્યું છે
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     return file.get('id')
 
