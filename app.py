@@ -196,9 +196,14 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         tmp.write(file.getvalue())
                         tmp_path = tmp.name
-                    
                     # ૧. Drive માં ફોટો અપલોડ કરો
-                    file_id = upload_to_drive(service, tmp_path, file.name, drive_folder_id)
+                    try:
+                        file_id = upload_to_drive(service, tmp_path, file.name, drive_folder_id)
+                    except Exception as e:
+                        st.error(f"❌ '{file.name}' ફોટો સેવ કરવામાં ભૂલ: {e}")
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                        continue # ક્રેશ થવાને બદલે સીધા બીજા ફોટા પર જશે
                     
                     # ૨. ચહેરો સ્કેન કરો
                     img = cv2.imread(tmp_path)
