@@ -452,7 +452,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
         # ઇવેન્ટ સિલેક્ટ કરવાનો ડ્રોપડાઉન
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         
-if selected_event:
+        if selected_event:
             st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
             
             # ફોટો અપલોડ બટન
