@@ -437,28 +437,35 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     initial_data = {"password": event_password, "faces": []}
                     if save_event_data_local(event_name, initial_data):
                         st.success(f"✅ ઇવેન્ટ '{event_name}' સફળતાપૂર્વક બની ગઈ!")
+                        st.rerun()
                     else:
                         st.error("❌ ઇવેન્ટ બનાવવામાં ભૂલ આવી.")
             else:
                 st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
 
-    events = get_events_list()
-    if not events:
+    # બધી ઇવેન્ટ્સનું લિસ્ટ મેળવો
+    available_events = list_all_local_events()
+
+    if not available_events:
         st.info("ℹ️ હજુ સુધી કોઈ ઇવેન્ટ નથી. ઉપર નવી ઇવેન્ટ બનાવો.")
     else:
-        selected_event = st.selectbox("📂 ઇવેન્ટ પસંદ કરો", events)
+        # ઇવેન્ટ સિલેક્ટ કરવાનો ડ્રોપડાઉન
+        selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         
         if selected_event:
-            st.subheader(f"📤 '{selected_event}' માં ફોટા અપલોડ કરો")
+            st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
+            
+            # ફોટો અપલોડ બટન
             uploaded_files = st.file_uploader(
-                "📸 ફોટા પસંદ કરો (JPG/PNG)...",
-                type=["jpg", "jpeg", "png"],
+                "ઇવેન્ટના ફોટા પસંદ કરો", 
+                type=['jpg', 'jpeg', 'png'], 
                 accept_multiple_files=True
             )
             
-            if st.button("🔍 ચહેરા શોધો") and uploaded_files:
-                # 1. ચકાસો કે ઇવેન્ટનું નામ ખાલી નથી
-                if selected_event and selected_event.strip():
+            if uploaded_files:
+                if st.button("🚀 ફોટા પ્રોસેસ અને સેવ કરો"):
+                    event_path, photos_path = get_event_dir(selected_event)
+                    # આગળનું ફોટો સેવ અને ફેસ ડિટેક્શનનું લોજિક...
                     # 2. હવે જ ફોલ્ડર ID મેળવો
                     folder_id = get_drive_folder_id(selected_event.strip())
                     if folder_id is None:
