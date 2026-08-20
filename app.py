@@ -65,8 +65,10 @@ def get_or_create_drive_folder(service, folder_name, parent_id=None):
 
 def upload_to_drive(service, file_path, file_name, folder_id, mime_type='image/jpeg'):
     """ફાઈલને ડ્રાઈવમાં અપલોડ કરશે."""
+    if not folder_id:
+        raise Exception("Google Drive Folder ID મળ્યો નથી. કૃપા કરીને આ ઇવેન્ટ ડિલીટ કરી નવી બનાવો.")
     file_metadata = {'name': file_name, 'parents': [folder_id]}
-    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)  # અહી False કર્યું છે
+    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     return file.get('id')
 
