@@ -452,7 +452,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
         # ઇવેન્ટ સિલેક્ટ કરવાનો ડ્રોપડાઉન
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         
-        if selected_event:
+if selected_event:
             st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
             
             # ફોટો અપલોડ બટન
@@ -464,45 +464,63 @@ if option == "📂 ઇવેન્ટ મેનેજ":
             
             if uploaded_files:
                 if st.button("🚀 ફોટા પ્રોસેસ અને સેવ કરો"):
-                    event_path, photos_path = get_event_dir(selected_event)
-                    # આગળનું ફોટો સેવ અને ફેસ ડિટેક્શનનું લોજિક...
-                    # 2. હવે જ ફોલ્ડર ID મેળવો
                     event_path, photos_path = get_event_dir(selected_event.strip())
-                    if folder_id is None:
-                        st.error("❌ Drive પર ફોલ્ડર મળ્યું નહીં. કૃપા કરીને ઇવેન્ટ ફરી બનાવો.")
+
+                    # જો ફોલ્ડર ન બન્યું હોય તો એરર બતાવો
+                    if not os.path.exists(photos_path):
+                        st.error("❌ ઇવેન્ટ ફોલ્ડર મળ્યું નહીં!")
                         st.stop()
-                else:
-                    st.error("❌ કૃપા કરીને યોગ્ય ઇવેન્ટ પસંદ કરો.")
-                    st.stop()
-                
-                # ... બાકીનો કોડ (progress_bar, ફોટા વાંચવા, ચહેરા શોધવા) ...
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                total_files = len(uploaded_files)
-                folder_id = get_drive_folder_id(selected_event)
-                
-                # ઇવેન્ટનો ડેટા પહેલેથી લોડ કરી લઈએ
-                event_data = load_event_data(selected_event)
-                existing_faces = event_data.get("faces", [])
-                auto_saved_count = 0
-                
-                for i, file in enumerate(uploaded_files):
-                    status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે...")
                     
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        file.seek(0)  # ફાઇલને શરૂઆતથી રીડ કરવા માટે
-                        tmp.write(file.getvalue())  # getvalue() વાપરવાથી ડેટા સુરક્ષિત રીતે લખાય છે
-                        tmp_path = tmp.name
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    total_files = len(uploaded_files)
                     
-                    img = cv2.imread(tmp_path)
-                    faces = app.get(img)
+                    # ઇવેન્ટનો લોકલ ડેટા લોડ કરો
+                    event_data = load_event_data_local(selected_event.strip())
+                    existing_faces = event_data.get("faces", [])
+                    processed_count = 0
                     
-                    if len(faces) == 0:
-                        st.warning(f"⚠️ {file.name} માં કોઈ ચહેરો નથી.")
-                        continue
+                    for i, file in enumerate(uploaded_files):
+                        status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
+                        
+                        # ૧. ફોટો લોકલ ડિરેક્ટરીમાં સેવ કરો
+                        file_path = os.path.join(photos_path, file.name)
+                        file.seek(0)
+                        with open(file_path, "wb") as f:
+                            f.write(file.getvalue())
+                        
+                        # ૨. સેવ કરેલા ફોટામાંથી ફેસ ડિટેક્શન કરો
+                        img = cv2.imread(file_path)
+                        if img is None:
+                            st.warning(f"⚠️ {file.name} વાંચવામાં ભૂલ આવી.")
+                            continue
+                            
+                        faces = app.get(img)
+                        
+                        if len(faces) == 0:
+                            st.warning(f"⚠️ {file.name} માં કોઈ ચહેરો મળ્યો નથી.")
+                            continue
+                        
+                        # ૩. દરેક મળેલા ચહેરાના એમ્બેડિંગ્સ લિસ્ટમાં ઉમેરો
+                        for face_idx, face in enumerate(faces):
+                            embedding_list = face.embedding.tolist()
+                            existing_faces.append({
+                                "photo_name": file.name,
+                                "file_path": file_path,
+                                "face_index": face_idx,
+                                "embedding": embedding_list
+                            })
+                            
+                        processed_count += 1
+                        progress_bar.progress((i + 1) / total_files)
                     
-                    # ડ્રાઈવ પર અપલોડ
+                    # ૪. ઇવેન્ટનો અપડેટ થયેલો ડેટા JSON માં સેવ કરો
+                    event_data["faces"] = existing_faces
+                    save_event_data_local(selected_event.strip(), event_data)
+                    
+                    status_text.empty()
+                    st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
+                    st.rerun()
                     file_ext = os.path.splitext(file.name)[1]
                     unique_name = f"{hashlib.md5(file.name.encode() + str(datetime.datetime.now()).encode()).hexdigest()[:10]}{file_ext}"
                     # લૂપની અંદર:
@@ -1066,7 +1084,7 @@ elif option == "📱 QR કોડ બનાવો":
         
         if selected_event:
             clean_event = selected_event.replace(" ", "_")
-            url = f"https://jayphotofinder.streamlit.app/?event={clean_event}"
+            url = f"https://jayphotofinder.streamlit.app/event={clean_event}"
             qr_img = qrcode.make(url)
             qr_img_array = np.array(qr_img.convert('RGB'))
             
