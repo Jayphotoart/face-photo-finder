@@ -522,18 +522,6 @@ if selected_event:
                     st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
                     st.rerun()
                     
-                    # ડ્રાઈવ પર અપલોડ
-                    file_ext = os.path.splitext(file.name)[1]
-                    unique_name = f"{hashlib.md5(file.name.encode() + str(datetime.datetime.now()).encode()).hexdigest()[:10]}{file_ext}"
-                    # લૂપની અંદર:
-                    file_path = os.path.join(photos_path, uploaded_file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    
-                    if drive_file_id is None:
-                        st.error(f"❌ {file.name} Drive પર અપલોડ થયો નહીં!")
-                        continue
-                    
                     # દરેક ચહેરા માટે
                     for j, face in enumerate(faces):
                         bbox = face.bbox.astype(int)
