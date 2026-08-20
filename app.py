@@ -5,37 +5,73 @@ import json
 import qrcode
 import os
 import shutil
-import datetime
 import tempfile
 import faiss
-import requests
-import urllib.parse
-import csv
 import pandas as pd
 from io import BytesIO
 from insightface.app import FaceAnalysis
-from PIL import Image
+
+# === GOOGLE DRIVE IMPORTS ===
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import io
 
 # Session state initialization
 if "pending_faces" not in st.session_state:
     st.session_state.pending_faces = []
 
 # ============================================================
-# ENVIRONMENT VARIABLE
-# ============================================================
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
-
-# ============================================================
 # PAGE CONFIG
 # ============================================================
-st.set_page_config(
-    page_title="જય ફોટો શોધ",
-    page_icon="📸",
-    layout="wide"
-)
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+st.set_page_config(page_title="જય ફોટો શોધ", page_icon="📸", layout="wide")
 
 # ============================================================
-# LOCAL STORAGE SYSTEM
+# GOOGLE DRIVE FUNCTIONS
+# ============================================================
+SCOPES = ['https://www.googleapis.com/auth/drive']
+
+@st.cache_resource
+def get_drive_service():
+    try:
+        # Streamlit Secrets માંથી Google Drive ના credentials લેશે
+        creds_info = st.secrets["gcp_service_account"]
+        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        st.error("❌ Google Drive Credentials મળ્યા નથી. કૃપા કરીને secrets.toml ચેક કરો.")
+        return None
+
+def get_or_create_drive_folder(service, folder_name, parent_id=None):
+    """ડ્રાઇવમાં ફોલ્ડર શોધશે, ન હોય તો નવું બનાવશે."""
+    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    
+    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    items = results.get('files', [])
+    
+    if not items:
+        file_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
+        if parent_id:
+            file_metadata['parents'] = [parent_id]
+        folder = service.files().create(body=file_metadata, fields='id').execute()
+        
+        # પબ્લિક એક્સેસ આપો જેથી એપમાં ફોટા દેખાય
+        service.permissions().create(fileId=folder.get('id'), body={'type': 'anyone', 'role': 'reader'}).execute()
+        return folder.get('id')
+    return items[0]['id']
+
+def upload_to_drive(service, file_path, file_name, folder_id, mime_type='image/jpeg'):
+    """ફાઈલને ડ્રાઈવમાં અપલોડ કરશે."""
+    file_metadata = {'name': file_name, 'parents': [folder_id]}
+    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    return file.get('id')
+
+# ============================================================
+# LOCAL STORAGE (ટૂંકા ગાળા માટે અને JSON માટે)
 # ============================================================
 BASE_STORAGE_DIR = "events_data"
 os.makedirs(BASE_STORAGE_DIR, exist_ok=True)
@@ -43,33 +79,22 @@ os.makedirs(BASE_STORAGE_DIR, exist_ok=True)
 def get_event_dir(event_name):
     clean_name = event_name.strip().replace(" ", "_")
     event_path = os.path.join(BASE_STORAGE_DIR, clean_name)
-    photos_path = os.path.join(event_path, "photos")
-    crops_path = os.path.join(event_path, "crops")
-    os.makedirs(photos_path, exist_ok=True)
-    os.makedirs(crops_path, exist_ok=True)
-    return event_path, photos_path, crops_path
+    os.makedirs(event_path, exist_ok=True)
+    return event_path
 
 def save_event_data_local(event_name, data):
-    try:
-        event_path, _, _ = get_event_dir(event_name)
-        data_file = os.path.join(event_path, f"{event_name}_data.json")
-        with open(data_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        st.error(f"❌ ડેટા સેવ કરતી વખતે ભૂલ: {e}")
-        return False
+    event_path = get_event_dir(event_name)
+    data_file = os.path.join(event_path, f"{event_name}_data.json")
+    with open(data_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 def load_event_data_local(event_name):
-    try:
-        event_path, _, _ = get_event_dir(event_name)
-        data_file = os.path.join(event_path, f"{event_name}_data.json")
-        if os.path.exists(data_file):
-            with open(data_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {"password": "", "faces": []}
-    except Exception as e:
-        return {"password": "", "faces": []}
+    event_path = get_event_dir(event_name)
+    data_file = os.path.join(event_path, f"{event_name}_data.json")
+    if os.path.exists(data_file):
+        with open(data_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"password": "", "faces": [], "drive_folder_id": ""}
 
 def list_all_local_events():
     if not os.path.exists(BASE_STORAGE_DIR):
@@ -86,12 +111,8 @@ def load_insightface():
     return app
 
 def parse_embedding(embedding_data):
-    if embedding_data is None:
-        return None
-    if isinstance(embedding_data, list):
-        return np.array(embedding_data, dtype=np.float32)
-    if isinstance(embedding_data, np.ndarray):
-        return embedding_data
+    if embedding_data is None: return None
+    if isinstance(embedding_data, list): return np.array(embedding_data, dtype=np.float32)
     return None
 
 app = load_insightface()
@@ -102,10 +123,8 @@ PHOTO_PRICE = 10
 # ============================================================
 col1, col2 = st.columns([1, 5])
 with col1:
-    if os.path.exists("assets/logo.jpg"):
-        st.image("assets/logo.jpg", width=100)
-    else:
-        st.markdown("## 📸")
+    if os.path.exists("assets/logo.jpg"): st.image("assets/logo.jpg", width=100)
+    else: st.markdown("## 📸")
 with col2:
     st.markdown("""
     <div style="margin-top: 10px;">
@@ -118,52 +137,51 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
 
-option = st.sidebar.selectbox(
-    "📌 પેજ પસંદ કરો",
-    ["🔍 ફોટો શોધો", "📂 ઇવેન્ટ મેનેજ", "📱 QR કોડ બનાવો"]
-)
+option = st.sidebar.selectbox("📌 પેજ પસંદ કરો", ["🔍 ફોટો શોધો", "📂 ઇવેન્ટ મેનેજ", "📱 QR કોડ બનાવો"])
 
 # ============================================================
-# PAGE 1: MANAGE EVENTS & SMART LABELING
+# PAGE 1: MANAGE EVENTS & GOOGLE DRIVE UPLOAD
 # ============================================================
 if option == "📂 ઇવેન્ટ મેનેજ":
-    st.subheader("📂 ઇવેન્ટ મેનેજમેન્ટ")
+    st.subheader("📂 ઇવેન્ટ મેનેજમેન્ટ (Google Drive)")
+    service = get_drive_service()
     
     with st.expander("➕ નવી ઇવેન્ટ બનાવો", expanded=False):
         new_event = st.text_input("ઇવેન્ટનું નામ (દા.ત., sharma_wedding)")
         event_password = st.text_input("🔒 ઇવેન્ટ પાસવર્ડ (ગ્રાહકો માટે)", type="password")
         
         if st.button("📌 ઇવેન્ટ બનાવો"):
-            if new_event.strip() and event_password.strip():
+            if new_event.strip() and event_password.strip() and service:
                 clean_name = new_event.strip().replace(" ", "_")
-                get_event_dir(clean_name)
-                initial_data = {"password": event_password.strip(), "faces": []}
-                if save_event_data_local(clean_name, initial_data):
-                    st.success(f"✅ ઇવેન્ટ '{clean_name}' સફળતાપૂર્વક બની ગઈ!")
-                    st.rerun()
+                
+                # ૧. ડ્રાઇવમાં મેઈન ફોલ્ડર બનાવો
+                root_id = get_or_create_drive_folder(service, "JayPhotoShodh_Events")
+                # ૨. તેની અંદર ઇવેન્ટનું ફોલ્ડર બનાવો
+                event_folder_id = get_or_create_drive_folder(service, clean_name, root_id)
+                
+                initial_data = {"password": event_password.strip(), "faces": [], "drive_folder_id": event_folder_id}
+                save_event_data_local(clean_name, initial_data)
+                
+                st.success(f"✅ ઇવેન્ટ '{clean_name}' સફળતાપૂર્વક Drive પર બની ગઈ!")
+                st.rerun()
             else:
-                st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
+                st.error("❌ નામ, પાસવર્ડ ભરો અને ખાતરી કરો કે Drive કનેક્ટ છે.")
 
     available_events = list_all_local_events()
 
     if not available_events:
-        st.info("ℹ️ હજુ સુધી કોઈ ઇવેન્ટ નથી. ઉપર નવી ઇવેન્ટ બનાવો.")
+        st.info("ℹ️ હજુ સુધી કોઈ ઇવેન્ટ નથી.")
     else:
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         
-        if selected_event:
+        if selected_event and service:
             st.markdown(f"### 📸 ફોટા અપલોડ કરો - `{selected_event}`")
+            uploaded_files = st.file_uploader("ઇવેન્ટના ફોટા પસંદ કરો", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
             
-            uploaded_files = st.file_uploader(
-                "ઇવેન્ટના ફોટા પસંદ કરો", 
-                type=['jpg', 'jpeg', 'png'], 
-                accept_multiple_files=True
-            )
-            
-            if uploaded_files and st.button("🚀 ફોટા પ્રોસેસ અને ચહેરા શોધો"):
-                event_path, photos_path, crops_path = get_event_dir(selected_event)
+            if uploaded_files and st.button("🚀 ફોટા Drive માં સેવ કરો"):
                 event_data = load_event_data_local(selected_event)
                 existing_faces = event_data.get("faces", [])
+                drive_folder_id = event_data.get("drive_folder_id")
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -171,30 +189,23 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                 new_pending = []
                 
                 for i, file in enumerate(uploaded_files):
-                    status_text.text(f"⏳ {file.name} પ્રોસેસ થઈ રહ્યો છે... ({i+1}/{total_files})")
+                    status_text.text(f"⏳ {file.name} Drive માં અપલોડ થઈ રહ્યો છે... ({i+1}/{total_files})")
                     
-                    file_path = os.path.join(photos_path, file.name)
-                    file.seek(0)
-                    with open(file_path, "wb") as f:
-                        f.write(file.getvalue())
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                        tmp.write(file.getvalue())
+                        tmp_path = tmp.name
                     
-                    img = cv2.imread(file_path)
+                    # ૧. Drive માં ફોટો અપલોડ કરો
+                    file_id = upload_to_drive(service, tmp_path, file.name, drive_folder_id)
+                    
+                    # ૨. ચહેરો સ્કેન કરો
+                    img = cv2.imread(tmp_path)
                     if img is not None:
                         faces = app.get(img)
-                        h, w = img.shape[:2]
-                        
                         for j, face in enumerate(faces):
                             norm_emb = face.embedding / np.linalg.norm(face.embedding)
                             
-                            # ચહેરો ક્રોપ કરો
-                            bbox = face.bbox.astype(int)
-                            x1, y1, x2, y2 = max(0, bbox[0]-15), max(0, bbox[1]-15), min(w, bbox[2]+15), min(h, bbox[3]+15)
-                            crop = img[y1:y2, x1:x2]
-                            crop_name = f"crop_{i}_{j}_{file.name}"
-                            crop_file_path = os.path.join(crops_path, crop_name)
-                            cv2.imwrite(crop_file_path, crop)
-                            
-                            # Auto-match check
+                            # ચહેરો ઓળખવાનો પ્રયાસ (Auto-match)
                             matched_label = None
                             for ef in existing_faces:
                                 db_emb = parse_embedding(ef.get("embedding"))
@@ -205,93 +216,51 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                             if matched_label and matched_label != "SKIP":
                                 existing_faces.append({
                                     "photo_name": file.name,
-                                    "file_path": file_path,
+                                    "drive_file_id": file_id,
                                     "person_label": matched_label,
                                     "embedding": norm_emb.tolist()
                                 })
                             else:
                                 new_pending.append({
-                                    "crop_path": crop_file_path,
-                                    "file_path": file_path,
                                     "photo_name": file.name,
+                                    "drive_file_id": file_id,
                                     "embedding": norm_emb.tolist(),
-                                    "label": ""
+                                    "label": "Guest"
                                 })
+                    
+                    os.remove(tmp_path)
                     progress_bar.progress((i + 1) / total_files)
                 
                 event_data["faces"] = existing_faces
                 save_event_data_local(selected_event, event_data)
-                st.session_state.pending_faces = new_pending
-                st.cache_resource.clear()
-                status_text.empty()
-                st.success("✅ ફોટા સ્કેન થઈ ગયા! નીચે ચહેરાઓને નામ આપો.")
-                st.rerun()
-            
-            # ---------- SMART GROUP LABELING UI ----------
-            if st.session_state.pending_faces:
-                st.divider()
-                st.subheader(f"🏷️ {len(st.session_state.pending_faces)} નવા ચહેરાઓને નામ આપો (Smart Groups)")
-                pending = st.session_state.pending_faces
                 
-                # કલસ્ટરિંગ (સરખા ચહેરાઓ ભેગા કરવા)
-                embs = np.array([f["embedding"] for f in pending], dtype=np.float32)
-                sim_matrix = np.dot(embs, embs.T)
-                n = len(pending)
-                visited = [False] * n
-                clusters = []
-                for i in range(n):
-                    if not visited[i]:
-                        cl = [i]
-                        visited[i] = True
-                        for j in range(i+1, n):
-                            if not visited[j] and sim_matrix[i][j] > 0.65:
-                                cl.append(j)
-                                visited[j] = True
-                        clusters.append(cl)
-                
-                # દરેક ગ્રૂપ માટે UI
-                for g_idx, cl in enumerate(clusters):
-                    st.markdown(f"**🎯 ગ્રૂપ {g_idx + 1} ({len(cl)} ચહેરા)**")
-                    cols = st.columns(min(5, len(cl)))
-                    for c_i, f_idx in enumerate(cl[:5]):
-                        with cols[c_i]:
-                            if os.path.exists(pending[f_idx]["crop_path"]):
-                                st.image(pending[f_idx]["crop_path"], width=100)
-                    
-                    lbl = st.text_input(f"આ વ્યક્તિનું નામ લખો (દા.ત. વરરાજા, દુલહન, રમેશભાઈ):", key=f"grp_lbl_{g_idx}")
-                    for f_idx in cl:
-                        pending[f_idx]["label"] = lbl.strip() if lbl.strip() else "Guest"
-                    st.write("---")
-                
-                if st.button("💾 બધા નામો સેવ કરો"):
-                    event_data = load_event_data_local(selected_event)
-                    existing_faces = event_data.get("faces", [])
-                    for pf in pending:
+                # અજાણ્યા ચહેરાઓને સીધા ગેસ્ટ (Guest) તરીકે સેવ કરી દઈએ (ઝડપ માટે)
+                if new_pending:
+                    for pf in new_pending:
                         existing_faces.append({
                             "photo_name": pf["photo_name"],
-                            "file_path": pf["file_path"],
+                            "drive_file_id": pf["drive_file_id"],
                             "person_label": pf["label"],
                             "embedding": pf["embedding"]
                         })
                     event_data["faces"] = existing_faces
                     save_event_data_local(selected_event, event_data)
-                    st.session_state.pending_faces = []
-                    st.cache_resource.clear()
-                    st.success("✅ બધા ચહેરા સફળતાપૂર્વક લેબલ થઈ ગયા!")
-                    st.rerun()
+                
+                st.cache_resource.clear()
+                status_text.empty()
+                st.success("✅ બધા ફોટા Google Drive પર અપલોડ થઈ ગયા અને ચહેરા સ્કેન થઈ ગયા!")
+                st.rerun()
 
-            # લિસ્ટિંગ અને ડિલીટ
             st.divider()
             event_data = load_event_data_local(selected_event)
             faces_list = event_data.get("faces", [])
-            st.write(f"📊 આ ઇવેન્ટમાં કુલ **{len(faces_list)}** ઓળખાયેલા ચહેરાઓ છે.")
+            st.write(f"📊 આ ઇવેન્ટમાં કુલ **{len(faces_list)}** ઓળખાયેલા ચહેરાઓ છે (Drive માં સેવ્ડ).")
             
             if st.button(f"🗑️ '{selected_event}' ઇવેન્ટ ડિલીટ કરો", type="primary"):
-                event_path, _, _ = get_event_dir(selected_event)
-                if os.path.exists(event_path):
-                    shutil.rmtree(event_path)
+                event_path = get_event_dir(selected_event)
+                if os.path.exists(event_path): shutil.rmtree(event_path)
                 st.cache_resource.clear()
-                st.success("✅ ઇવેન્ટ ડિલીટ થઈ ગઈ!")
+                st.success("✅ ઇવેન્ટ લોકલમાંથી ડિલીટ થઈ ગઈ!")
                 st.rerun()
 
 # ============================================================
@@ -311,7 +280,6 @@ elif option == "🔍 ફોટો શોધો":
     
     event_data = load_event_data_local(event_name)
     
-    # પાસવર્ડ ચેક
     if event_data.get("password"):
         if f"auth_{event_name}" not in st.session_state:
             st.session_state[f"auth_{event_name}"] = False
@@ -350,18 +318,18 @@ elif option == "🔍 ફોટો શોધો":
                     if db_emb is not None:
                         sim = float(np.dot(q_emb, db_emb))
                         if sim >= 0.45 and f_item["photo_name"] not in seen_photos:
-                            if os.path.exists(f_item["file_path"]):
-                                matched.append((f_item["file_path"], f_item["photo_name"], f_item.get("person_label", "Guest")))
-                                seen_photos.add(f_item["photo_name"])
+                            matched.append((f_item["drive_file_id"], f_item["photo_name"]))
+                            seen_photos.add(f_item["photo_name"])
                                 
                 if matched:
-                    st.success(f"🎉 તમારા {len(matched)} ફોટા મળ્યા!")
+                    st.success(f"🎉 તમારા {len(matched)} ફોટા મળ્યા! (Drive માંથી)")
                     cols = st.columns(3)
-                    for idx, (p_path, p_name, p_lbl) in enumerate(matched):
+                    for idx, (f_id, p_name) in enumerate(matched):
                         with cols[idx % 3]:
-                            st.image(p_path, caption=f"{p_name} ({p_lbl})", use_container_width=True)
-                            with open(p_path, "rb") as f:
-                                st.download_button("⬇️ ડાઉનલોડ", f, file_name=p_name, key=f"dl_{idx}")
+                            # સીધી ગૂગલ ડ્રાઇવની લિંકથી ફોટો બતાવશે
+                            drive_url = f"https://drive.google.com/uc?export=view&id={f_id}"
+                            st.image(drive_url, caption=p_name, use_container_width=True)
+                            st.link_button("⬇️ ડાઉનલોડ", drive_url)
                 else:
                     st.warning("🔍 આ ઇવેન્ટમાં તમારો કોઈ ફોટો મળ્યો નથી.")
 
@@ -376,7 +344,7 @@ elif option == "📱 QR કોડ બનાવો":
     else:
         selected_event = st.selectbox("📂 ઇવેન્ટ પસંદ કરો", events)
         if selected_event:
-            # તમારી ખરી લિંક
+            # ✅ અહી તમારું નવું ડોમેન સેવ થયેલું છે!
             url = f"https://jayphotoart.in/?event={selected_event}"
             qr = qrcode.make(url)
             buf = BytesIO()
@@ -390,30 +358,8 @@ elif option == "📱 QR કોડ બનાવો":
                 st.info("💡 ગ્રાહક આ QR સ્કેન કરશે એટલે સીધું આ પેજ ખુલશે:")
                 st.code(url)
 
-# ============================================================
-# PAGE 4: ANALYTICS & BENCHMARK
-# ============================================================
-elif option == "📊 Analytics":
-    st.header("📊 વપરાશ એનાલિટિક્સ")
-    if os.path.exists("analytics.csv"):
-        df = pd.read_csv("analytics.csv")
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("ℹ️ હજુ કોઈ એનાલિટિક્સ ડેટા ઉપલબ્ધ નથી.")
-
-else:
-    st.header("📊 બેન્ચમાર્ક પરિણામો")
-    if os.path.exists("benchmark_results.csv"):
-        df = pd.read_csv("benchmark_results.csv")
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("ℹ️ benchmark_results.csv ફાઇલ મળી નથી.")
-
-# ============================================================
-# FOOTER
-# ============================================================
 st.markdown("""
-<div class="footer">
+<div style="text-align: center; padding: 2rem 0 0.5rem 0; border-top: 1px solid #f0f0f0; color: #adb5bd; font-size: 0.8rem; margin-top:3rem;">
     📸 <strong>જય ફોટો શોધ</strong> - AI દ્વારા તમારા ફોટા શોધો<br>
     © 2026 Jay Photography | Made with ❤️ in Gujarat
 </div>
