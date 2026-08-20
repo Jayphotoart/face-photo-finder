@@ -176,7 +176,7 @@ with st.expander("➕ નવી ઇવેન્ટ બનાવો", expanded=Fa
             else:
                 st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
 
-    available_events = list_all_local_events()
+                available_events = list_all_local_events()
 
     if not available_events:
         st.info("ℹ️ હજુ સુધી કોઈ ઇવેન્ટ નથી.")
