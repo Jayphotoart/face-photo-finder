@@ -551,8 +551,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                         os.makedirs("temp_crops", exist_ok=True)
                         cv2.imwrite(crop_path, face_crop)
                         
-                        embedding = face.embedding / np.linalg.norm(face.embedding)
-                        
+                        embedding = face.embedding / np.linalg.norm(face.embedding)                       
                         # --- SMART AUTO-LABEL CHECK ---
                         matched_label = None
                         best_sim = 0.0
