@@ -99,40 +99,36 @@ def get_drive_service():
 ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8"
 
 def get_drive_folder_id(event_name):
-    drive_service = get_drive_service()
-    
-    # ROOT_FOLDER_ID ની અંદર ઇવેન્ટનું ફોલ્ડર શોધો
-    query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
-    results = drive_service.files().list(
-        q=query, 
-        spaces='drive', 
-        fields='files(id, name)', 
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
-    ).execute()
-    items = results.get('files', [])
-    
-    if items:
-        return items[0]['id']
-    else:
-        # જો ન હોય તો ROOT_FOLDER_ID ની અંદર નવું ફોલ્ડર બનાવો
-        folder_metadata = {
-            'name': event_name,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [ROOT_FOLDER_ID]
-        }
-        folder = drive_service.files().create(
-            body=folder_metadata, 
-            fields='id', 
-            supportsAllDrives=True
+    try:
+        drive_service = get_drive_service()
+        
+        # ROOT_FOLDER_ID ની અંદર ઇવેન્ટનું ફોલ્ડર શોધો
+        query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
+        results = drive_service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name)', 
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
         ).execute()
-        return folder.get('id')
-        file_metadata = {
-            'name': event_name,
-            'mimeType': 'application/vnd.google-apps.folder'
-        }
-        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-        return folder.get('id')
+        items = results.get('files', [])
+        
+        if items:
+            return items[0]['id']
+        else:
+            # જો ન હોય તો ROOT_FOLDER_ID ની અંદર નવું ફોલ્ડર બનાવો
+            folder_metadata = {
+                'name': event_name,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [ROOT_FOLDER_ID]
+            }
+            folder = drive_service.files().create(
+                body=folder_metadata, 
+                fields='id', 
+                supportsAllDrives=True
+            ).execute()
+            return folder.get('id')
+            
     except Exception as e:
         st.error(f"❌ Google Drive API Error: {e}")
         return None
