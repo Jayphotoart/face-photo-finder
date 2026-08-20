@@ -184,51 +184,46 @@ def load_event_data_from_drive(event_name):
 def save_event_data_to_drive(event_name, data, folder_id):
     try:
         drive_service = get_drive_service()
-        if drive_service is None:
-            st.error("❌ Google Drive સર્વિસ ઉપલબ્ધ નથી.")
-            return False
-
-        temp_path = f"temp_{event_name}_data.json"
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
-        # --- ડીબગ માટે ---
-        st.write(f"📝 ફાઇલ લખાઈ: {temp_path}")
-        st.write(f"📁 ફોલ્ડર ID: {folder_id}")
-        # --- અહીં સુધી ---
-
-        import time
-        time.sleep(0.5)
-
-        # Drive પર જૂની data.json શોધો
-        query = f"name='data.json' and '{folder_id}' in parents and trashed=false"
-        results = drive_service.files().list(q=query, fields="files(id)").execute()
-        for file in results.get('files', []):
-            drive_service.files().delete(fileId=file['id']).execute()
-
-        # નવી data.json અપલોડ કરો
-        media = MediaFileUpload(temp_path, mimetype='application/json')
-        file_metadata = {
-            'name': 'data.json',
-            'parents': [folder_id]
-        }
-        drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
+        filename = f"{event_name}_data.json"
+        
+        # પહેલા જૂની JSON ફાઇલ શોધો
+        query = f"name = '{filename}' and '{folder_id}' in parents and trashed = false"
+        results = drive_service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id)',
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
         ).execute()
-
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-
+        files = results.get('files', [])
+        
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        media = MediaInMemoryUpload(json_str.encode('utf-8'), mimetype='application/json', resumable=True)
+        
+        if files:
+            # જો ફાઇલ પહેલેથી હોય તો અપડેટ કરો
+            file_id = files[0]['id']
+            drive_service.files().update(
+                fileId=file_id,
+                media_body=media,
+                supportsAllDrives=True
+            ).execute()
+        else:
+            # જો નવી ફાઇલ હોય તો folder_id ની અંદર બનાવો
+            file_metadata = {
+                'name': filename,
+                'parents': [folder_id]
+            }
+            drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id',
+                supportsAllDrives=True
+            ).execute()
+            
         return True
-
     except Exception as e:
-        # 🔥 આ લાઇન ઉમેરો – સંપૂર્ણ ભૂલ બતાવશે
-        st.error(f"❌ Error saving to Drive: {e}")
-        st.exception(e)   # <--- આ લાઇન સંપૂર્ણ ભૂલ બતાવશે
+        st.error(f"❌ ઇવેન્ટ સેવ કરતી વખતે ભૂલ આવી: {e}")
         return False
 
 # ============================================================
