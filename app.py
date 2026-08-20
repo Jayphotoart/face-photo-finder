@@ -96,20 +96,37 @@ def get_drive_service():
     
     return build('drive', 'v3', credentials=creds)
 
+ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8"
+
 def get_drive_folder_id(event_name):
-    """ઇવેન્ટ માટે Google Drive ફોલ્ડર ID મેળવો"""
-    st.write(f"🔍 DEBUG: get_drive_folder_id called with: {event_name}")  # <--- ડીબગ, ઇચ્છા હોય તો દૂર કરો
     drive_service = get_drive_service()
-    st.write(f"🔍 DEBUG: drive_service = {drive_service}")  # <--- ડીબગ
-    if drive_service is None:
-        st.error("❌ Google Drive સર્વિસ ઉપલબ્ધ નથી. Secrets ચકાસો.")
-        return None
-    try:
-        query = f"name='{event_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-        folders = results.get('files', [])
-        if folders:
-            return folders[0]['id']
+    
+    # ROOT_FOLDER_ID ની અંદર ઇવેન્ટનું ફોલ્ડર શોધો
+    query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
+    results = drive_service.files().list(
+        q=query, 
+        spaces='drive', 
+        fields='files(id, name)', 
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
+    items = results.get('files', [])
+    
+    if items:
+        return items[0]['id']
+    else:
+        # જો ન હોય તો ROOT_FOLDER_ID ની અંદર નવું ફોલ્ડર બનાવો
+        folder_metadata = {
+            'name': event_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [ROOT_FOLDER_ID]
+        }
+        folder = drive_service.files().create(
+            body=folder_metadata, 
+            fields='id', 
+            supportsAllDrives=True
+        ).execute()
+        return folder.get('id')
         file_metadata = {
             'name': event_name,
             'mimeType': 'application/vnd.google-apps.folder'
@@ -121,24 +138,25 @@ def get_drive_folder_id(event_name):
         return None
 
 def upload_to_drive(file_path, folder_id):
-    """Google Drive પર ફોટો અપલોડ કરો"""
-    drive_service = get_drive_service()
-    if drive_service is None or folder_id is None:
-        return None
     try:
+        drive_service = get_drive_service()
         file_metadata = {
             'name': os.path.basename(file_path),
-            'parents': [folder_id]
+            'parents': [folder_id]  # શેર કરેલા ફોલ્ડરની અંદર જ ફાઇલ બનશે
         }
+        
         media = MediaFileUpload(file_path, resumable=True)
+        
         file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id',
+            supportsAllDrives=True  # Shared Drive / Folders સપોર્ટ માટે
         ).execute()
+        
         return file.get('id')
     except Exception as e:
-        st.error(f"❌ Google Drive upload error: {e}")
+        st.error(f"Google Drive upload error: {e}")
         return None
 
 def load_event_data_from_drive(event_name):
