@@ -1,4 +1,13 @@
 import streamlit as st
+import os
+
+# 🔥 આ લાઇન Streamlit ને કહે છે કે એપ કયા ડોમેન પર ચાલી રહી છે
+st.set_page_config(page_title="JAY PHOTO SHODH", page_icon="📸", initial_sidebar_state="collapsed")
+
+# આ લાઇન ખાસ કરીને રીડાયરેક્ટ રોકવા માટે
+os.environ["STREAMLIT_SERVER_BASE_URL_PATH"] = "https://www.jayphotoart.in"
+
+import streamlit as st
 import cv2
 import numpy as np
 import json
