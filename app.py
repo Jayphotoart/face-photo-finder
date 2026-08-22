@@ -41,9 +41,12 @@ st.set_page_config(page_title="જય ફોટો શોધ", page_icon="📸",
 # ============================================================
 # GOOGLE DRIVE INTEGRATION (જેમ છે તેમ રાખો)
 # ============================================================
-ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8-"
+ROOT_FOLDER_ID = "1B-qd1ZtJkQfxIUzpUCxdvaVIMAkVQtqH"
 
 def get_drive_service():
+    """Google Drive Service - Service Account (Cloud) અથવા OAuth (લોકલ)"""
+    
+    # 1️⃣ Service Account (st.secrets માંથી) - આ Cloud માટે યોગ્ય છે
     try:
         service_account_info = dict(st.secrets["gcp_service_account"])
         creds = service_account.Credentials.from_service_account_info(
@@ -52,17 +55,32 @@ def get_drive_service():
         )
         return build('drive', 'v3', credentials=creds)
     except Exception:
+        # Service Account ન મળે તો આગળ વધો
         pass
+
+    # 2️⃣ શું આપણે Cloud પર છીએ? (Streamlit Cloud ને શોધો)
+    is_cloud = os.environ.get('STREAMLIT_SHARING') or os.environ.get('STREAMLIT_CLOUD')
+    if is_cloud:
+        # Cloud પર OAuth શક્ય નથી, એટલે ભૂલ બતાવો
+        st.error("❌ Google Drive Service Account સેટ નથી. કૃપા કરીને st.secrets માં 'gcp_service_account' ઉમેરો.")
+        return None
+
+    # 3️⃣ OAuth 2.0 (ફક્ત લોકલ માટે - token.pickle અને credentials.json ની જરૂર)
     creds = None
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
+    
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
         else:
+            # credentials.json ફાઈલ હોવી જોઈએ, ન હોય તો error
+            if not os.path.exists('credentials.json'):
+                st.error("❌ 'credentials.json' ફાઈલ મળી નહીં. OAuth સેટ કરવા માટે તેને લોકલ ફોલ્ડરમાં મૂકો.")
+                return None
             flow = InstalledAppFlow.from_client_secrets_file(
                 'credentials.json',
                 scopes=['https://www.googleapis.com/auth/drive.file']
@@ -70,6 +88,7 @@ def get_drive_service():
             creds = flow.run_local_server(port=0)
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
+    
     return build('drive', 'v3', credentials=creds)
 
 def get_drive_folder_id(event_name):
@@ -93,6 +112,30 @@ def get_drive_folder_id(event_name):
         return None
 
 def upload_to_drive(file_path, folder_id):
+    try:
+        drive_service = get_drive_service()
+        if drive_service is None:
+            return None
+
+        file_metadata = {
+            'name': os.path.basename(file_path),
+            'parents': [folder_id]  # આ folder_id હવે Shared Drive ની અંદરના ફોલ્ડરનો ID છે
+        }
+        
+        media = MediaFileUpload(file_path, resumable=True)
+        
+        # 🔥 મહત્વનો ફેરફાર: 'supportsAllDrives=True' ઉમેરો
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id',
+            supportsAllDrives=True  # <--- આ લાઈન ઉમેરો
+        ).execute()
+        
+        return file.get('id')
+    except Exception as e:
+        st.error(f"Google Drive upload error: {e}")
+        return None
     try:
         drive_service = get_drive_service()
         file_metadata = {'name': os.path.basename(file_path), 'parents': [folder_id]}
