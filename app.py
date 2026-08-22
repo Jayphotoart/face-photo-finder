@@ -369,6 +369,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     processed_count = 0
                     auto_saved_count = 0   # ✅ વ્યાખ્યા ઉમેરી
 
+                    folder_id = get_drive_folder_id(selected_event.strip())  # Drive Folder ID
                     for i, file in enumerate(uploaded_files):
                         status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
 
@@ -377,6 +378,10 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                         file.seek(0)
                         with open(file_path, "wb") as f:
                             f.write(file.getvalue())
+                        # ---------- 🔥 નવો ફેરફાર: Drive પર અપલોડ ----------
+                        drive_file_id = upload_to_drive(file_path, folder_id)
+                        # જો Drive API ન ચાલે તો drive_file_id = None રહેશે, પણ કોઈ ભૂલ નહીં આવે
+                        # -------------------------------------------------------
 
                         # ૨. ફેસ ડિટેક્શન
                         img = cv2.imread(file_path)
@@ -450,6 +455,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     # ૪. ડેટા સેવ કરો
                     event_data["faces"] = existing_faces
                     save_event_data_local(selected_event.strip(), event_data)
+                    save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
 
                     status_text.empty()
                     st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ થયા! (ઓટો-સેવ: {auto_saved_count})")
