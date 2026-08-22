@@ -1,7 +1,6 @@
 import streamlit as st
 
-# આ લાઇન રીડાયરેક્ટને રોકે છે
-st.set_option('server.baseUrlPath', 'https://www.jayphotoart.in')
+# st.set_option('server.baseUrlPath', 'https://www.jayphotoart.in')
 
 import streamlit as st
 import cv2
