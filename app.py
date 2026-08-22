@@ -426,7 +426,6 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                 event_name = new_event.strip()
                 initial_data = {"password": event_password, "faces": []}
                 if save_event_data_local(event_name, initial_data):
-                    # ફોલ્ડર પણ બને તે માટે get_event_dir કૉલ કરો
                     get_event_dir(event_name)
                     st.success(f"✅ ઇવેન્ટ '{event_name}' સફળતાપૂર્વક બની ગઈ!")
                     st.rerun()
@@ -450,7 +449,9 @@ if option == "📂 ઇવેન્ટ મેનેજ":
 
             if uploaded_files:
                 if st.button("🚀 ફોટા પ્રોસેસ અને સેવ કરો"):
+                    # ---------- Drive Folder ID (એક વાર મેળવો) ----------
                     folder_id = get_drive_folder_id(selected_event.strip())
+
                     event_path, photos_path = get_event_dir(selected_event.strip())
                     if not os.path.exists(photos_path):
                         st.error("❌ ઇવેન્ટ ફોલ્ડર મળ્યું નહીં!")
@@ -463,39 +464,34 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     event_data = load_event_data_local(selected_event.strip())
                     existing_faces = event_data.get("faces", [])
                     processed_count = 0
-                    auto_saved_count = 0   # ✅ વ્યાખ્યા ઉમેરી
+                    auto_saved_count = 0
 
-                for i, file in enumerate(uploaded_files):
-                    status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
+                    # ---------- એક જ લૂપ (બધું અંદર) ----------
+                    for i, file in enumerate(uploaded_files):
+                        status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
 
-                    # ૧. ફોટો લોકલ સેવ કરો
-                    file_path = os.path.join(photos_path, file.name)
-                    file.seek(0)
-                    with open(file_path, "wb") as f:
+                        # ૧. ફોટો લોકલ સેવ કરો
+                        file_path = os.path.join(photos_path, file.name)
+                        file.seek(0)
+                        with open(file_path, "wb") as f:
                             f.write(file.getvalue())
-                        # ---------- 🔥 નવો ફેરફાર: Drive પર અપલોડ ----------
-                    drive_file_id = upload_to_drive(file_path, folder_id)
-                        # જો Drive API ન ચાલે તો drive_file_id = None રહેશે, પણ કોઈ ભૂલ નહીં આવે
-                        # -------------------------------------------------------
+
+                        # ---------- Drive પર અપલોડ ----------
+                        drive_file_id = upload_to_drive(file_path, folder_id) if folder_id else None
 
                         # ૨. ફેસ ડિટેક્શન
-                    img = cv2.imread(file_path)
-                    if img is None:
+                        img = cv2.imread(file_path)
+                        if img is None:
                             st.warning(f"⚠️ {file.name} વાંચવામાં ભૂલ આવી.")
                             continue
 
-                    faces = app.get(img)
-                    if len(faces) == 0:
+                        faces = app.get(img)
+                        if len(faces) == 0:
                             st.warning(f"⚠️ {file.name} માં કોઈ ચહેરો મળ્યો નથી.")
                             continue
 
                         # ૩. દરેક ચહેરા માટે
-                    for face_idx, face in enumerate(faces):
-                            embedding_list = face.embedding.tolist()
-                            # અત્યારે drive_file_id નથી, પછી upload_to_drive કરી શકો
-                            drive_file_id = None  # અથવા upload_to_drive(file_path, folder_id) કરો
-                            unique_name = file.name  # હાલ માટે ફાઈલ નામ
-
+                        for face_idx, face in enumerate(faces):
                             # ચહેરો ક્રોપ કરો
                             bbox = face.bbox.astype(int)
                             x1, y1, x2, y2 = bbox
@@ -506,7 +502,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                             x2 = min(w, x2 + pad)
                             y2 = min(h, y2 + pad)
                             face_crop = img[y1:y2, x1:x2]
-                            crop_filename = f"{hashlib.md5((unique_name + str(face_idx)).encode()).hexdigest()[:8]}.jpg"
+                            crop_filename = f"{hashlib.md5((file.name + str(face_idx)).encode()).hexdigest()[:8]}.jpg"
                             crop_path = os.path.join("temp_crops", crop_filename)
                             os.makedirs("temp_crops", exist_ok=True)
                             cv2.imwrite(crop_path, face_crop)
@@ -527,7 +523,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
 
                             if matched_label and matched_label != "SKIP":
                                 existing_faces.append({
-                                    "filename": unique_name,
+                                    "filename": file.name,
                                     "drive_file_id": drive_file_id,
                                     "person_label": matched_label,
                                     "embedding": embedding.tolist()
@@ -539,21 +535,25 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                                 st.session_state.pending_faces.append({
                                     "crop_path": crop_path,
                                     "embedding": embedding.tolist(),
-                                    "original_filename": unique_name,
+                                    "original_filename": file.name,
                                     "drive_file_id": drive_file_id,
                                     "label": "SKIP"
                                 })
 
-                    processed_count += 1
-                    progress_bar.progress((i + 1) / total_files)
+                        processed_count += 1
+                        progress_bar.progress((i + 1) / total_files)
 
-                        # ૪. ડેટા સેવ કરો
+                    # ---------- ૪. ડેટા સેવ કરો (લૂપની બહાર) ----------
                     event_data["faces"] = existing_faces
+
+                    # લોકલ સેવ
                     save_event_data_local(selected_event.strip(), event_data)
+
+                    # Drive સેવ (જો folder_id હોય તો)
                     if folder_id:
-                            save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
+                        save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
                     else:
-                            st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
+                        st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
 
                     status_text.empty()
                     st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ થયા! (ઓટો-સેવ: {auto_saved_count})")
@@ -625,21 +625,29 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                                 "embedding": face_data["embedding"]
                             })
                             count += 1
-                            # ૪. ડેટા સેવ કરો
-                            event_data["faces"] = existing_faces
 
-                            # લોકલમાં સેવ
-                            save_event_data_local(selected_event.strip(), event_data)
+                    event_data["faces"] = existing_faces
 
-                            # Drive પર પણ સેવ (જો folder_id મળે)
-                            if folder_id:
-                                save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
-                            else:
-                                st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
+                    # લોકલ સેવ
+                    save_event_data_local(selected_event.strip(), event_data)
 
-                            status_text.empty()
-                            st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
-                            st.rerun()
+                    # Drive સેવ
+                    if folder_id:
+                        save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
+                    else:
+                        st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
+
+                    # ક્રોપ ફાઈલો ડિલીટ કરો
+                    for face_data in pending:
+                        try:
+                            if os.path.exists(face_data["crop_path"]):
+                                os.remove(face_data["crop_path"])
+                        except:
+                            pass
+                    st.session_state.pending_faces = []
+                    st.cache_resource.clear()
+                    st.success(f"✅ {count} નવા ચહેરા '{selected_event}' માં સેવ થયા!")
+                    st.rerun()
 
                     # ક્રોપ ફાઈલો ડિલીટ કરો
                     for face_data in pending:
