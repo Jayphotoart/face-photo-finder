@@ -440,6 +440,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
     else:
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
         if selected_event:
+            folder_id = get_drive_folder_id(selected_event.strip())
             st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
             uploaded_files = st.file_uploader(
                 "ઇવેન્ટના ફોટા પસંદ કરો",
@@ -561,6 +562,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
 
             # ---------- SMART GROUP LABELING ----------
             if st.session_state.pending_faces:
+                folder_id = get_drive_folder_id(selected_event.strip())
                 st.subheader(f"🏷️ {len(st.session_state.pending_faces)} નવા ચહેરાઓને સ્માર્ટ ગ્રૂપમાં ગોઠવો")
                 st.caption("🔍 સમાન દેખાતા નવા ચહેરાઓ એક ગ્રૂપમાં ગોઠવાયા છે. નામ આપો:")
 
