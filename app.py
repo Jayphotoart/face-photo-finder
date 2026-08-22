@@ -598,7 +598,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                             })
                             count += 1
                     event_data["faces"] = existing_faces
-                    save_event_data_local(selected_event.strip(), event_data)
+                    save_event_data_local(selected_event.strip(), event_data, folder_id)
 
                     # ક્રોપ ફાઈલો ડિલીટ કરો
                     for face_data in pending:
