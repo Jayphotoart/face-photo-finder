@@ -95,7 +95,13 @@ def get_drive_folder_id(event_name):
     try:
         drive_service = get_drive_service()
         query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
-        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+        results = drive_service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name)', 
+            supportsAllDrives=True,          # <--- છે
+            includeItemsFromAllDrives=True   # <--- છે
+        ).execute()
         items = results.get('files', [])
         if items:
             return items[0]['id']
@@ -105,7 +111,11 @@ def get_drive_folder_id(event_name):
                 'mimeType': 'application/vnd.google-apps.folder',
                 'parents': [ROOT_FOLDER_ID]
             }
-            folder = drive_service.files().create(body=folder_metadata, fields='id', supportsAllDrives=True).execute()
+            folder = drive_service.files().create(
+                body=folder_metadata, 
+                fields='id', 
+                supportsAllDrives=True       # <--- છે
+            ).execute()
             return folder.get('id')
     except Exception as e:
         st.error(f"❌ Google Drive API Error: {e}")
@@ -123,7 +133,7 @@ def upload_to_drive(file_path, folder_id):
         }
         media = MediaFileUpload(file_path, resumable=True)
 
-        # 🔥 આ લાઇન ઉમેરો - Shared Drive માં અપલોડ કરવા માટે
+        supportsAllDrives=True
         file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
@@ -143,7 +153,17 @@ def upload_to_drive(file_path, folder_id):
     except Exception as e:
         st.error(f"Google Drive upload error: {e}")
         return None
-
+def save_event_data_local(event_name, data):
+    """લોકલ events/event_name/data.json માં સેવ કરો"""
+    try:
+        event_path, _ = get_event_dir(event_name)
+        json_path = os.path.join(event_path, "data.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        st.error(f"Local save error: {e}")
+        return False
 # ============================================================
 # LOCAL EVENT FUNCTIONS (ગુમ થયેલા ફંક્શન્સ)
 # ============================================================
@@ -162,20 +182,25 @@ def save_event_data_to_drive(event_name, data, folder_id):
             st.warning("⚠️ Google Drive ઉપલબ્ધ નથી.")
             return False
 
-        # ... (અહીં temp_path બનાવવાનો કોડ છે) ...
+        # 🔥 આ લાઇન ઉમેરો (temp_path વ્યાખ્યાયિત કરો)
+        temp_path = f"temp_{event_name}_data.json"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
-        # Drive પર જૂની data.json શોધો
+        supportsAllDrives=True
         query = f"name='data.json' and '{folder_id}' in parents and trashed=false"
         results = drive_service.files().list(
             q=query, 
             fields="files(id)",
             supportsAllDrives=True   # <--- આ ઉમેરો
         ).execute()
+        supportsAllDrives=True
         for file in results.get('files', []):
             drive_service.files().delete(
                 fileId=file['id'],
                 supportsAllDrives=True   # <--- આ ઉમેરો
             ).execute()
+            supportsAllDrives=True
 
         # નવી data.json અપલોડ કરો
         media = MediaFileUpload(temp_path, mimetype='application/json')
@@ -425,6 +450,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
 
             if uploaded_files:
                 if st.button("🚀 ફોટા પ્રોસેસ અને સેવ કરો"):
+                    folder_id = get_drive_folder_id(selected_event.strip())
                     event_path, photos_path = get_event_dir(selected_event.strip())
                     if not os.path.exists(photos_path):
                         st.error("❌ ઇવેન્ટ ફોલ્ડર મળ્યું નહીં!")
@@ -439,6 +465,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     processed_count = 0
                     auto_saved_count = 0   # ✅ વ્યાખ્યા ઉમેરી
 
+                for i, file in enumerate(uploaded_files):
                     folder_id = get_drive_folder_id(selected_event.strip())  # Drive Folder ID
                     for i, file in enumerate(uploaded_files):
                         status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
@@ -597,8 +624,21 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                                 "embedding": face_data["embedding"]
                             })
                             count += 1
-                    event_data["faces"] = existing_faces
-                    save_event_data_local(selected_event.strip(), event_data, folder_id)
+                            # ૪. ડેટા સેવ કરો
+                            event_data["faces"] = existing_faces
+
+                            # લોકલમાં સેવ
+                            save_event_data_local(selected_event.strip(), event_data)
+
+                            # Drive પર પણ સેવ (જો folder_id મળે)
+                            if folder_id:
+                                save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
+                            else:
+                                st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
+
+                            status_text.empty()
+                            st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
+                            st.rerun()
 
                     # ક્રોપ ફાઈલો ડિલીટ કરો
                     for face_data in pending:
