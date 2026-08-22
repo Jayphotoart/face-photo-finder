@@ -119,19 +119,17 @@ def upload_to_drive(file_path, folder_id):
 
         file_metadata = {
             'name': os.path.basename(file_path),
-            'parents': [folder_id]  # આ folder_id હવે Shared Drive ની અંદરના ફોલ્ડરનો ID છે
+            'parents': [folder_id]
         }
-        
         media = MediaFileUpload(file_path, resumable=True)
-        
-        # 🔥 મહત્વનો ફેરફાર: 'supportsAllDrives=True' ઉમેરો
+
+        # 🔥 આ લાઇન ઉમેરો - Shared Drive માં અપલોડ કરવા માટે
         file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id',
-            supportsAllDrives=True  # <--- આ લાઈન ઉમેરો
+            supportsAllDrives=True   # <--- આ
         ).execute()
-        
         return file.get('id')
     except Exception as e:
         st.error(f"Google Drive upload error: {e}")
@@ -157,16 +155,45 @@ def get_event_dir(event_name):
     os.makedirs(photos_path, exist_ok=True)
     return event_path, photos_path
 
-def save_event_data_local(event_name, data):
-    """લોકલ data.json સેવ કરો"""
+def save_event_data_to_drive(event_name, data, folder_id):
     try:
-        event_path, _ = get_event_dir(event_name)
-        json_path = os.path.join(event_path, "data.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        drive_service = get_drive_service()
+        if drive_service is None:
+            st.warning("⚠️ Google Drive ઉપલબ્ધ નથી.")
+            return False
+
+        # ... (અહીં temp_path બનાવવાનો કોડ છે) ...
+
+        # Drive પર જૂની data.json શોધો
+        query = f"name='data.json' and '{folder_id}' in parents and trashed=false"
+        results = drive_service.files().list(
+            q=query, 
+            fields="files(id)",
+            supportsAllDrives=True   # <--- આ ઉમેરો
+        ).execute()
+        for file in results.get('files', []):
+            drive_service.files().delete(
+                fileId=file['id'],
+                supportsAllDrives=True   # <--- આ ઉમેરો
+            ).execute()
+
+        # નવી data.json અપલોડ કરો
+        media = MediaFileUpload(temp_path, mimetype='application/json')
+        file_metadata = {
+            'name': 'data.json',
+            'parents': [folder_id]
+        }
+        drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id',
+            supportsAllDrives=True   # <--- આ ઉમેરો
+        ).execute()
+
+        # ... (બાકીનો કોડ) ...
         return True
     except Exception as e:
-        st.error(f"Local save error: {e}")
+        st.error(f"❌ Error saving to Drive: {e}")
         return False
 
 def load_event_data_local(event_name):
