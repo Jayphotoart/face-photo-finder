@@ -1019,7 +1019,18 @@ elif option == "📱 QR કોડ બનાવો":
 
         if selected_event:
             clean_event = selected_event.replace(" ", "_")
-            url = f"https://www.jayphotoart.in"
+            # ધારો કે યુઝરે આમાં ઇવેન્ટ નામ લખ્યું / પસંદ કર્યું
+            event_name = wedding_input  # અથવા selectbox માંથી મળેલું નામ
+
+            # QR કોડ માટે URL બનાવો
+            qr_url = f"https://www.jayphotoart.in?event={event_name}"
+
+            # QR કોડ જનરેટ કરો
+            img = qrcode.make(qr_url)
+
+            # QR કોડ બતાવો (અને ડાઉનલોડ માટે સેવ કરો)
+            st.image(img)
+            img.save(f"{event_name}_qr.png")  # આ ફાઇલને સેવ કરે છે
             qr_img = qrcode.make(url)
             qr_img_array = np.array(qr_img.convert('RGB'))
 
