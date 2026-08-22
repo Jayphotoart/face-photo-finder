@@ -1002,6 +1002,19 @@ elif option == "🔍 ફોટો શોધો":
 # ============================================================
 # PAGE 3: GENERATE QR CODE
 # ============================================================
+import streamlit as st
+import qrcode
+import io
+
+# ... તમારો લોગિન કોડ અહીં આવશે ...
+
+# ---- લોગિન થયા પછીનો એપ કોડ ----
+st.title("📸 JAY PHOTO SHODH")
+
+# ઇવેન્ટ નામ માટે ઇનપુટ
+event_name = st.text_input("📝 ઇવેન્ટનું નામ લખો (દા.ત. wedding, birthday):")
+
+# QR કોડ જનરેટ કરવાનો બટન
 if st.button("🎫 QR કોડ બનાવો"):
     if not event_name.strip():
         st.warning("કૃપા કરીને ઇવેન્ટનું નામ લખો!")
@@ -1013,7 +1026,7 @@ if st.button("🎫 QR કોડ બનાવો"):
         img = qrcode.make(qr_url)
         
         # QR કોડ બતાવો
-        st.image(img, caption=f"{event_name} માટે QR કોડ")
+        st.image(img, caption=f"{event_name} ઇવેન્ટ માટે QR કોડ")
         
         # QR કોડ ડાઉનલોડ માટે
         buf = io.BytesIO()
@@ -1028,7 +1041,6 @@ if st.button("🎫 QR કોડ બનાવો"):
         )
         
         st.success(f"✅ {event_name} ઇવેન્ટ માટે QR કોડ તૈયાર છે!")
-
         with col2:
             st.info("💡 કેવી રીતે વાપરવું?")
             st.write("1. આ QR કોડને પ્રિન્ટ કરીને ઇવેન્ટમાં મૂકો.")
