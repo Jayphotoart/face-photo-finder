@@ -1002,58 +1002,38 @@ elif option == "🔍 ફોટો શોધો":
 # ============================================================
 # PAGE 3: GENERATE QR CODE
 # ============================================================
-elif option == "📱 QR કોડ બનાવો":
-    st.markdown("""
-    <div class="card">
-        <div class="card-title">📱 QR કોડ બનાવો</div>
-        <div class="card-desc">અહીં તમે કોઈ પણ ઇવેન્ટ માટે QR કોડ બનાવી શકો છો. ગ્રાહકો આ QR કોડ સ્કેન કરીને તેમના ફોટા શોધી શકશે.</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    events = list_all_local_events()
-
-    if not events:
-        st.warning("⚠️ હજુ સુધી કોઈ ઇવેન્ટ નથી. કૃપા કરીને '📂 ઇવેન્ટ મેનેજ' માં પહેલાં ઇવેન્ટ બનાવો.")
+if st.button("🎫 QR કોડ બનાવો"):
+    if not event_name.strip():
+        st.warning("કૃપા કરીને ઇવેન્ટનું નામ લખો!")
     else:
-        selected_event = st.selectbox("📂 ઇવેન્ટ પસંદ કરો", events)
+        # QR URL બનાવો
+        qr_url = f"https://www.jayphotoart.in?event={event_name}"
+        
+        # QR કોડ જનરેટ કરો
+        img = qrcode.make(qr_url)
+        
+        # QR કોડ બતાવો
+        st.image(img, caption=f"{event_name} માટે QR કોડ")
+        
+        # QR કોડ ડાઉનલોડ માટે
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        
+        st.download_button(
+            label="📥 QR ડાઉનલોડ કરો",
+            data=buf,
+            file_name=f"{event_name}_qr.png",
+            mime="image/png"
+        )
+        
+        st.success(f"✅ {event_name} ઇવેન્ટ માટે QR કોડ તૈયાર છે!")
 
-        if selected_event:
-            clean_event = selected_event.replace(" ", "_")
-            # ધારો કે યુઝરે આમાં ઇવેન્ટ નામ લખ્યું / પસંદ કર્યું
-            event_name = wedding_input  # અથવા selectbox માંથી મળેલું નામ
-
-            # QR કોડ માટે URL બનાવો
-            qr_url = f"https://www.jayphotoart.in?event={event_name}"
-
-            # QR કોડ જનરેટ કરો
-            img = qrcode.make(qr_url)
-
-            # QR કોડ બતાવો (અને ડાઉનલોડ માટે સેવ કરો)
-            st.image(img)
-            img.save(f"{event_name}_qr.png")  # આ ફાઇલને સેવ કરે છે
-            qr_img = qrcode.make(url)
-            qr_img_array = np.array(qr_img.convert('RGB'))
-
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.image(qr_img_array, caption=f"📱 '{selected_event}' માટે QR કોડ", width=300)
-                st.success(f"🔗 URL: {url}")
-                st.caption("📌 ગ્રાહકો આ QR કોડ સ્કેન કરીને તેમના ફોટા જોઈ શકે છે.")
-
-                buffered = io.BytesIO()
-                qr_img.save(buffered, format="PNG")
-                st.download_button(
-                    label="⬇ QR કોડ ડાઉનલોડ કરો",
-                    data=buffered.getvalue(),
-                    file_name=f"qr_{clean_event}.png",
-                    mime="image/png"
-                )
-
-            with col2:
-                st.info("💡 કેવી રીતે વાપરવું?")
-                st.write("1. આ QR કોડને પ્રિન્ટ કરીને ઇવેન્ટમાં મૂકો.")
-                st.write("2. ગ્રાહકો ફોન વડે સ્કેન કરશે.")
-                st.write("3. તેઓ સેલ્ફી લઈને તેમના ફોટા જોશે.")
+        with col2:
+            st.info("💡 કેવી રીતે વાપરવું?")
+            st.write("1. આ QR કોડને પ્રિન્ટ કરીને ઇવેન્ટમાં મૂકો.")
+            st.write("2. ગ્રાહકો ફોન વડે સ્કેન કરશે.")
+            st.write("3. તેઓ સેલ્ફી લઈને તેમના ફોટા જોશે.")
 
 # ============================================================
 # PAGE 4: BENCHMARK
