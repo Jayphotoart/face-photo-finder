@@ -1019,7 +1019,7 @@ elif option == "📱 QR કોડ બનાવો":
 
         if selected_event:
             clean_event = selected_event.replace(" ", "_")
-            url = f"https://jayphotofinder.streamlit.app?event={clean_event}"
+            url = f"https://www.jayphotoart.in"
             qr_img = qrcode.make(url)
             qr_img_array = np.array(qr_img.convert('RGB'))
 
