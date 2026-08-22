@@ -466,8 +466,6 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     auto_saved_count = 0   # ✅ વ્યાખ્યા ઉમેરી
 
                 for i, file in enumerate(uploaded_files):
-                    folder_id = get_drive_folder_id(selected_event.strip())  # Drive Folder ID
-                    for i, file in enumerate(uploaded_files):
                         status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
 
                         # ૧. ફોટો લોકલ સેવ કરો
@@ -549,14 +547,17 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                         processed_count += 1
                         progress_bar.progress((i + 1) / total_files)
 
-                    # ૪. ડેટા સેવ કરો
-                    event_data["faces"] = existing_faces
-                    save_event_data_local(selected_event.strip(), event_data)
-                    save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
+                        # ૪. ડેટા સેવ કરો
+                        event_data["faces"] = existing_faces
+                        save_event_data_local(selected_event.strip(), event_data)
+                        if folder_id:
+                            save_event_data_to_drive(selected_event.strip(), event_data, folder_id)
+                        else:
+                            st.warning("⚠️ Drive folder ID નથી, ફક્ત લોકલ સેવ થશે.")
 
-                    status_text.empty()
-                    st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ થયા! (ઓટો-સેવ: {auto_saved_count})")
-                    st.rerun()
+                        status_text.empty()
+                        st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ થયા! (ઓટો-સેવ: {auto_saved_count})")
+                        st.rerun()
 
             # ---------- SMART GROUP LABELING ----------
             if st.session_state.pending_faces:
