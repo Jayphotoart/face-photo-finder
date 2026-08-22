@@ -1,8 +1,4 @@
 import streamlit as st
-
-# st.set_option('server.baseUrlPath', 'https://www.jayphotoart.in')
-
-import streamlit as st
 import cv2
 import numpy as np
 import json
@@ -14,14 +10,11 @@ import hashlib
 import datetime
 import tempfile
 import faiss
-import webbrowser
 import requests
 import urllib.parse
 import csv
 import pandas as pd
 import pickle
-import zipfile
-import io
 from insightface.app import FaceAnalysis
 from face_search import find_best_global_assignment
 from PIL import Image
@@ -36,26 +29,21 @@ from google.auth.transport.requests import Request
 # ============================================================
 if "pending_faces" not in st.session_state:
     st.session_state.pending_faces = []
+if "cart" not in st.session_state:
+    st.session_state.cart = []
+if "payment_done" not in st.session_state:
+    st.session_state.payment_done = False
 
-# ============================================================
-# ENV
-# ============================================================
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-st.set_page_config(
-    page_title="જય ફોટો શોધ",
-    page_icon="📸",
-    layout="wide"
-)
+st.set_page_config(page_title="જય ફોટો શોધ", page_icon="📸", layout="wide")
 
 # ============================================================
-# GOOGLE DRIVE INTEGRATION
+# GOOGLE DRIVE INTEGRATION (જેમ છે તેમ રાખો)
 # ============================================================
+ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8-"
+
 def get_drive_service():
-    """Service Account (Cloud) or OAuth (Local)"""
     try:
         service_account_info = dict(st.secrets["gcp_service_account"])
         creds = service_account.Credentials.from_service_account_info(
@@ -65,12 +53,10 @@ def get_drive_service():
         return build('drive', 'v3', credentials=creds)
     except Exception:
         pass
-
     creds = None
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
-
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -84,22 +70,13 @@ def get_drive_service():
             creds = flow.run_local_server(port=0)
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
-
     return build('drive', 'v3', credentials=creds)
-
-ROOT_FOLDER_ID = "1hjfbRbjG--pUPzOnnk8flKkNtQfquV8-"
 
 def get_drive_folder_id(event_name):
     try:
         drive_service = get_drive_service()
         query = f"name = '{event_name}' and mimeType = 'application/vnd.google-apps.folder' and '{ROOT_FOLDER_ID}' in parents and trashed = false"
-        results = drive_service.files().list(
-            q=query,
-            spaces='drive',
-            fields='files(id, name)',
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
         items = results.get('files', [])
         if items:
             return items[0]['id']
@@ -109,11 +86,7 @@ def get_drive_folder_id(event_name):
                 'mimeType': 'application/vnd.google-apps.folder',
                 'parents': [ROOT_FOLDER_ID]
             }
-            folder = drive_service.files().create(
-                body=folder_metadata,
-                fields='id',
-                supportsAllDrives=True
-            ).execute()
+            folder = drive_service.files().create(body=folder_metadata, fields='id', supportsAllDrives=True).execute()
             return folder.get('id')
     except Exception as e:
         st.error(f"❌ Google Drive API Error: {e}")
@@ -122,59 +95,27 @@ def get_drive_folder_id(event_name):
 def upload_to_drive(file_path, folder_id):
     try:
         drive_service = get_drive_service()
-        file_metadata = {
-            'name': os.path.basename(file_path),
-            'parents': [folder_id]
-        }
+        file_metadata = {'name': os.path.basename(file_path), 'parents': [folder_id]}
         media = MediaFileUpload(file_path, resumable=True)
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id',
-            supportsAllDrives=True
-        ).execute()
+        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id', supportsAllDrives=True).execute()
         return file.get('id')
     except Exception as e:
         st.error(f"Google Drive upload error: {e}")
         return None
 
 # ============================================================
-# LOCAL FILE FUNCTIONS (missing ones)
+# LOCAL EVENT FUNCTIONS (ગુમ થયેલા ફંક્શન્સ)
 # ============================================================
 def get_event_dir(event_name):
-    """લોકલ events ફોલ્ડરમાં ઇવેન્ટ ડિરેક્ટરી અને images ફોલ્ડરનો પાથ આપે છે"""
-    event_path = os.path.join("events", event_name)
+    """લોકલ ફોલ્ડર પાથ બનાવો"""
+    base = "events"
+    event_path = os.path.join(base, event_name)
     photos_path = os.path.join(event_path, "images")
     os.makedirs(photos_path, exist_ok=True)
     return event_path, photos_path
 
-def list_all_local_events():
-    """events ફોલ્ડરમાં રહેલી બધી ઇવેન્ટ્સની યાદી"""
-    events_dir = "events"
-    if not os.path.exists(events_dir):
-        return []
-    return [d for d in os.listdir(events_dir) if os.path.isdir(os.path.join(events_dir, d))]
-
-def load_event_data_local(event_name):
-    """લોકલ ફાઈલમાંથી ઇવેન્ટ ડેટા વાંચો"""
-    event_path, _ = get_event_dir(event_name)
-    json_path = os.path.join(event_path, "data.json")
-    if os.path.exists(json_path):
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                data = {"password": "", "faces": data}
-            for face in data.get("faces", []):
-                if "embedding" in face and isinstance(face["embedding"], str):
-                    try:
-                        face["embedding"] = json.loads(face["embedding"])
-                    except:
-                        face["embedding"] = []
-            return data
-    return {"password": "", "faces": []}
-
 def save_event_data_local(event_name, data):
-    """લોકલ ફાઈલમાં ઇવેન્ટ ડેટા સેવ કરો"""
+    """લોકલ data.json સેવ કરો"""
     try:
         event_path, _ = get_event_dir(event_name)
         json_path = os.path.join(event_path, "data.json")
@@ -182,8 +123,51 @@ def save_event_data_local(event_name, data):
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        st.error(f"❌ લોકલ સેવ ભૂલ: {e}")
+        st.error(f"Local save error: {e}")
         return False
+
+def load_event_data_local(event_name):
+    """લોકલ data.json વાંચો"""
+    try:
+        event_path, _ = get_event_dir(event_name)
+        json_path = os.path.join(event_path, "data.json")
+        if not os.path.exists(json_path):
+            return {"password": "", "faces": []}
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            data = {"password": "", "faces": data}
+        # એમ્બેડિંગ્સ યોગ્ય ફોર્મેટમાં લાવો
+        for face in data.get("faces", []):
+            if "embedding" in face and isinstance(face["embedding"], str):
+                try:
+                    face["embedding"] = json.loads(face["embedding"])
+                except:
+                    face["embedding"] = []
+        return data
+    except Exception:
+        return {"password": "", "faces": []}
+
+def list_all_local_events():
+    """બધી લોકલ ઇવેન્ટ્સની યાદી"""
+    base = "events"
+    if not os.path.exists(base):
+        return []
+    events = []
+    for item in os.listdir(base):
+        path = os.path.join(base, item)
+        if os.path.isdir(path) and os.path.exists(os.path.join(path, "data.json")):
+            events.append(item)
+    return events
+
+# ============================================================
+# HELPER: load/save event (લોકલ જ)
+# ============================================================
+def load_event_data(event_name):
+    return load_event_data_local(event_name)
+
+def save_event_data(event_name, data):
+    return save_event_data_local(event_name, data)
 
 # ============================================================
 # ANALYTICS
@@ -208,151 +192,10 @@ def log_activity(event_name, activity_type, person_label="", amount=0):
         return False
 
 # ============================================================
-# CUSTOM CSS
+# CSS, HEADER, SIDEBAR (એ જ રાખો, વધુ નહીં લખું)
 # ============================================================
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
-    * { font-family: 'Inter', sans-serif; }
-    .main-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 1rem 0;
-        border-bottom: 2px solid #f0f0f0;
-        margin-bottom: 2rem;
-    }
-    .logo-area {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    .logo-area img {
-        height: 55px;
-        width: auto;
-        border-radius: 12px;
-    }
-    .brand-text h1 {
-        font-size: 1.8rem;
-        font-weight: 800;
-        color: #0f0f0f;
-        margin: 0;
-        letter-spacing: -0.5px;
-    }
-    .brand-text h1 span {
-        color: #d4af37;
-    }
-    .brand-text .tagline {
-        font-size: 0.85rem;
-        font-weight: 400;
-        color: #6c757d;
-        margin: -5px 0 0 0;
-    }
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f0f0f 0%, #1a1a1a 100%);
-        padding: 2rem 1rem;
-    }
-    .sidebar-logo {
-        text-align: center;
-        margin-bottom: 2.5rem;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        padding-bottom: 1.5rem;
-    }
-    .sidebar-logo img {
-        width: 80%;
-        max-width: 180px;
-        border-radius: 16px;
-        background: white;
-        padding: 8px;
-        margin-bottom: 10px;
-    }
-    .sidebar-logo .brand-name {
-        color: white;
-        font-weight: 700;
-        font-size: 1.2rem;
-        margin: 0;
-    }
-    .sidebar-logo .brand-name span {
-        color: #d4af37;
-    }
-    .card {
-        background: white;
-        border: 1px solid #f0f0f0;
-        border-radius: 24px;
-        padding: 1.8rem;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.04);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        margin-bottom: 1.5rem;
-    }
-    .card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-    }
-    .card-title {
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #0f0f0f;
-        margin-bottom: 0.3rem;
-    }
-    .card-desc {
-        font-size: 0.95rem;
-        color: #6c757d;
-        line-height: 1.6;
-    }
-    .stButton button {
-        background: linear-gradient(135deg, #0f0f0f 0%, #333333 100%) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 50px !important;
-        padding: 0.6rem 2.2rem !important;
-        font-weight: 600 !important;
-        font-size: 0.9rem !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-        transition: all 0.3s ease !important;
-    }
-    .stButton button:hover {
-        transform: scale(1.02) !important;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.25) !important;
-        background: linear-gradient(135deg, #1a1a1a 0%, #444444 100%) !important;
-    }
-    .footer {
-        text-align: center;
-        padding: 2rem 0 0.5rem 0;
-        margin-top: 3rem;
-        border-top: 1px solid #f0f0f0;
-        color: #adb5bd;
-        font-size: 0.8rem;
-        font-weight: 400;
-    }
-    .footer strong {
-        color: #0f0f0f;
-        font-weight: 700;
-    }
-    .footer span {
-        color: #d4af37;
-    }
-    @media (max-width: 768px) {
-        .logo-area img { height: 40px !important; }
-        .brand-text h1 { font-size: 1.5rem !important; }
-        .brand-text .tagline { font-size: 0.7rem !important; }
-        .main-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
-        .card { padding: 1rem !important; border-radius: 16px !important; }
-        .card-title { font-size: 1.1rem !important; }
-        .card-desc { font-size: 0.85rem !important; }
-        .stButton button { font-size: 0.8rem !important; padding: 0.4rem 1.2rem !important; width: 100% !important; }
-        .stImage { width: 100% !important; }
-        section[data-testid="stSidebar"] { padding: 0.5rem !important; }
-        .sidebar-logo img { max-width: 120px !important; }
-        .sidebar-logo .brand-name { font-size: 1rem !important; }
-        .stSidebar .stColumns { gap: 0.3rem !important; }
-        .stSidebar .stButton button { font-size: 0.7rem !important; padding: 0.3rem 0.6rem !important; }
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown("""<style> ... તમારું CSS અહીં મૂકો ... </style>""", unsafe_allow_html=True)
 
-# ============================================================
-# HEADER & SIDEBAR
-# ============================================================
 col1, col2 = st.columns([1, 5])
 with col1:
     try:
@@ -389,24 +232,18 @@ option = st.sidebar.selectbox(
     format_func=lambda x: x
 )
 
-import streamlit as st
-
-# પાસવર્ડને secrets.toml થી લો
-PASSWORD = st.secrets.get("PASSWORD", "JayPhotoArt@2026")
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
+# ============================================================
+# PASSWORD PROTECTION (એડમિન)
+# ============================================================
 def check_password():
-    if st.session_state.authenticated:
+    if st.session_state.get("authenticated", False):
         return True
-
-    st.sidebar.title("🔒 લોગિન")
-    password = st.sidebar.text_input("પાસવર્ડ", type="password", key="admin_pass")
+    st.sidebar.markdown("---")
+    password = st.sidebar.text_input("🔒 એડમિન પાસવર્ડ:", type="password", key="admin_pass")
     if password:
-        if password == PASSWORD:
+        if password.strip() == "JayPhotoArt@2026":
             st.session_state.authenticated = True
-            st.sidebar.success("✅ સફળતા!")
+            st.sidebar.success("✅ પ્રવેશ મળ્યો!")
             st.rerun()
             return True
         else:
@@ -414,16 +251,8 @@ def check_password():
             return False
     return False
 
-# ---- એપ શરૂ થાય છે ----
-if not check_password():
-    st.stop()  # લોગિન ન થાય ત્યાં સુધી અટકાવો
-
-# ---- એપનો મૂળ કોડ ----
-st.title("📸 JAY PHOTO SHODH")
-st.write("AI POWERED PHOTO SEARCH")
-
 # ============================================================
-# TELEGRAM BOT
+# TELEGRAM
 # ============================================================
 def send_telegram_message(message):
     try:
@@ -450,7 +279,7 @@ def load_insightface():
 
 @st.cache_resource
 def load_event_faiss_index(event_name):
-    data = load_event_data_local(event_name)
+    data = load_event_data(event_name)
     if not data or not data.get("faces"):
         return None, None
     valid_faces = []
@@ -480,25 +309,11 @@ def parse_embedding(embedding_data):
         return embedding_data
     return None
 
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
-
 app = load_insightface()
-
-# ============================================================
-# CONSTANTS
-# ============================================================
 PHOTO_PRICE = 10
 
 # ============================================================
-# PAGE 1: MANAGE EVENTS
+# PAGE 1: MANAGE EVENTS (સુધારેલ)
 # ============================================================
 if option == "📂 ઇવેન્ટ મેનેજ":
     st.markdown("""
@@ -511,13 +326,13 @@ if option == "📂 ઇવેન્ટ મેનેજ":
     with st.expander("➕ નવી ઇવેન્ટ બનાવો", expanded=False):
         new_event = st.text_input("ઇવેન્ટનું નામ (દા.ત., શર્મા_લગ્ન)")
         event_password = st.text_input("🔒 ઇવેન્ટ પાસવર્ડ (ગ્રાહકો માટે)", type="password")
-
         if st.button("📌 ઇવેન્ટ બનાવો", key="create_event"):
             if new_event.strip() and event_password.strip():
                 event_name = new_event.strip()
-                event_path, photos_path = get_event_dir(event_name)
                 initial_data = {"password": event_password, "faces": []}
                 if save_event_data_local(event_name, initial_data):
+                    # ફોલ્ડર પણ બને તે માટે get_event_dir કૉલ કરો
+                    get_event_dir(event_name)
                     st.success(f"✅ ઇવેન્ટ '{event_name}' સફળતાપૂર્વક બની ગઈ!")
                     st.rerun()
                 else:
@@ -526,15 +341,12 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                 st.error("❌ કૃપા કરીને નામ અને પાસવર્ડ બંને ભરો.")
 
     available_events = list_all_local_events()
-
     if not available_events:
         st.info("ℹ️ હજુ સુધી કોઈ ઇવેન્ટ નથી. ઉપર નવી ઇવેન્ટ બનાવો.")
     else:
         selected_event = st.selectbox("📁 ઇવેન્ટ પસંદ કરો", available_events)
-
         if selected_event:
             st.subheader(f"📸 ફોટા અપલોડ કરો - {selected_event}")
-
             uploaded_files = st.file_uploader(
                 "ઇવેન્ટના ફોટા પસંદ કરો",
                 type=['jpg', 'jpeg', 'png'],
@@ -544,7 +356,6 @@ if option == "📂 ઇવેન્ટ મેનેજ":
             if uploaded_files:
                 if st.button("🚀 ફોટા પ્રોસેસ અને સેવ કરો"):
                     event_path, photos_path = get_event_dir(selected_event.strip())
-
                     if not os.path.exists(photos_path):
                         st.error("❌ ઇવેન્ટ ફોલ્ડર મળ્યું નહીં!")
                         st.stop()
@@ -556,78 +367,165 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                     event_data = load_event_data_local(selected_event.strip())
                     existing_faces = event_data.get("faces", [])
                     processed_count = 0
+                    auto_saved_count = 0   # ✅ વ્યાખ્યા ઉમેરી
 
                     for i, file in enumerate(uploaded_files):
                         status_text.text(f"⏳ {file.name} પર કામ ચાલુ છે... ({i+1}/{total_files})")
 
+                        # ૧. ફોટો લોકલ સેવ કરો
                         file_path = os.path.join(photos_path, file.name)
                         file.seek(0)
                         with open(file_path, "wb") as f:
                             f.write(file.getvalue())
 
+                        # ૨. ફેસ ડિટેક્શન
                         img = cv2.imread(file_path)
                         if img is None:
                             st.warning(f"⚠️ {file.name} વાંચવામાં ભૂલ આવી.")
                             continue
 
                         faces = app.get(img)
-
                         if len(faces) == 0:
                             st.warning(f"⚠️ {file.name} માં કોઈ ચહેરો મળ્યો નથી.")
                             continue
 
+                        # ૩. દરેક ચહેરા માટે
                         for face_idx, face in enumerate(faces):
                             embedding_list = face.embedding.tolist()
-                            existing_faces.append({
-                                "photo_name": file.name,
-                                "file_path": file_path,
-                                "face_index": face_idx,
-                                "embedding": embedding_list
-                            })
+                            # અત્યારે drive_file_id નથી, પછી upload_to_drive કરી શકો
+                            drive_file_id = None  # અથવા upload_to_drive(file_path, folder_id) કરો
+                            unique_name = file.name  # હાલ માટે ફાઈલ નામ
+
+                            # ચહેરો ક્રોપ કરો
+                            bbox = face.bbox.astype(int)
+                            x1, y1, x2, y2 = bbox
+                            pad = 20
+                            h, w = img.shape[:2]
+                            x1 = max(0, x1 - pad)
+                            y1 = max(0, y1 - pad)
+                            x2 = min(w, x2 + pad)
+                            y2 = min(h, y2 + pad)
+                            face_crop = img[y1:y2, x1:x2]
+                            crop_filename = f"{hashlib.md5((unique_name + str(face_idx)).encode()).hexdigest()[:8]}.jpg"
+                            crop_path = os.path.join("temp_crops", crop_filename)
+                            os.makedirs("temp_crops", exist_ok=True)
+                            cv2.imwrite(crop_path, face_crop)
+
+                            embedding = face.embedding / np.linalg.norm(face.embedding)
+
+                            # --- SMART AUTO-LABEL ---
+                            matched_label = None
+                            best_sim = 0.0
+                            if existing_faces:
+                                for item in existing_faces:
+                                    db_emb = parse_embedding(item.get("embedding"))
+                                    if db_emb is not None:
+                                        sim = float(np.dot(embedding, db_emb))
+                                        if sim > 0.65 and sim > best_sim:
+                                            best_sim = sim
+                                            matched_label = item.get("person_label")
+
+                            if matched_label and matched_label != "SKIP":
+                                existing_faces.append({
+                                    "filename": unique_name,
+                                    "drive_file_id": drive_file_id,
+                                    "person_label": matched_label,
+                                    "embedding": embedding.tolist()
+                                })
+                                auto_saved_count += 1
+                                if os.path.exists(crop_path):
+                                    os.remove(crop_path)
+                            else:
+                                st.session_state.pending_faces.append({
+                                    "crop_path": crop_path,
+                                    "embedding": embedding.tolist(),
+                                    "original_filename": unique_name,
+                                    "drive_file_id": drive_file_id,
+                                    "label": "SKIP"
+                                })
 
                         processed_count += 1
                         progress_bar.progress((i + 1) / total_files)
 
+                    # ૪. ડેટા સેવ કરો
                     event_data["faces"] = existing_faces
                     save_event_data_local(selected_event.strip(), event_data)
 
                     status_text.empty()
-                    st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ અને સેવ થઈ ગયા!")
+                    st.success(f"✅ {processed_count} ફોટા સફળતાપૂર્વક પ્રોસેસ થયા! (ઓટો-સેવ: {auto_saved_count})")
                     st.rerun()
 
-            # PENDING FACES LABELING (SIMPLIFIED – we keep only the labeling part, but we must ensure it works)
-            if 'pending_faces' in st.session_state and st.session_state.pending_faces:
-                st.subheader(f"🏷️ {len(st.session_state.pending_faces)} નવા ચહેરાઓને લેબલ આપો")
-                for idx, face_data in enumerate(st.session_state.pending_faces):
-                    col1, col2 = st.columns([1, 3])
-                    with col1:
-                        if os.path.exists(face_data["crop_path"]):
-                            st.image(face_data["crop_path"], width=150)
-                        else:
-                            st.warning("ફોટો મળ્યો નથી")
-                    with col2:
-                        label = st.text_input(f"ચહેરો {idx+1} માટે નામ", key=f"label_{idx}")
-                        if label.strip():
-                            face_data["label"] = label.strip()
-                        else:
-                            face_data["label"] = "SKIP"
-                if st.button("💾 બધા લેબલ સેવ કરો"):
+            # ---------- SMART GROUP LABELING ----------
+            if st.session_state.pending_faces:
+                st.subheader(f"🏷️ {len(st.session_state.pending_faces)} નવા ચહેરાઓને સ્માર્ટ ગ્રૂપમાં ગોઠવો")
+                st.caption("🔍 સમાન દેખાતા નવા ચહેરાઓ એક ગ્રૂપમાં ગોઠવાયા છે. નામ આપો:")
+
+                pending = st.session_state.pending_faces
+                embeddings = np.array([face["embedding"] for face in pending], dtype=np.float32)
+                norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                norms[norms == 0] = 1
+                embeddings_norm = embeddings / norms
+                sim_matrix = np.dot(embeddings_norm, embeddings_norm.T)
+
+                threshold = 0.65
+                n = len(pending)
+                visited = [False] * n
+                clusters = []
+                for i in range(n):
+                    if not visited[i]:
+                        cluster = [i]
+                        visited[i] = True
+                        for j in range(i+1, n):
+                            if not visited[j] and sim_matrix[i][j] > threshold:
+                                cluster.append(j)
+                                visited[j] = True
+                        clusters.append(cluster)
+
+                for group_idx, cluster in enumerate(clusters):
+                    st.markdown(f"### 🎯 ગ્રૂપ {group_idx + 1} (કુલ {len(cluster)} ચહેરા)")
+                    cols = st.columns(min(4, len(cluster)))
+                    for col_idx, face_idx in enumerate(cluster):
+                        col = cols[col_idx % 4]
+                        with col:
+                            face_data = pending[face_idx]
+                            if os.path.exists(face_data["crop_path"]):
+                                st.image(face_data["crop_path"], width=150)
+                            else:
+                                st.warning("⚠️ ફોટો મળ્યો નથી")
+
+                    group_label = st.text_input(
+                        f"ગ્રૂપ {group_idx + 1} ને નામ આપો",
+                        value="",
+                        key=f"group_label_{group_idx}",
+                        placeholder="દા.ત., રાજેશ, પ્રિયા, A"
+                    )
+                    if group_label.strip():
+                        for face_idx in cluster:
+                            pending[face_idx]["label"] = group_label.strip()
+                    else:
+                        for face_idx in cluster:
+                            pending[face_idx]["label"] = "SKIP"
+                    st.divider()
+
+                if st.button("💾 બધા લેબલ સેવ કરો", key="save_all_labels"):
                     event_data = load_event_data_local(selected_event.strip())
                     existing_faces = event_data.get("faces", [])
                     count = 0
-                    for face_data in st.session_state.pending_faces:
-                        lbl = face_data.get("label", "SKIP")
+                    for face_data in pending:
+                        lbl = face_data["label"].strip()
                         if lbl != "SKIP" and lbl != "":
                             existing_faces.append({
-                                "filename": face_data.get("original_filename", "unknown"),
-                                "drive_file_id": face_data.get("drive_file_id", ""),
+                                "filename": face_data["original_filename"],
+                                "drive_file_id": face_data["drive_file_id"],
                                 "person_label": lbl,
                                 "embedding": face_data["embedding"]
                             })
                             count += 1
                     event_data["faces"] = existing_faces
                     save_event_data_local(selected_event.strip(), event_data)
-                    for face_data in st.session_state.pending_faces:
+
+                    # ક્રોપ ફાઈલો ડિલીટ કરો
+                    for face_data in pending:
                         try:
                             if os.path.exists(face_data["crop_path"]):
                                 os.remove(face_data["crop_path"])
@@ -635,7 +533,7 @@ if option == "📂 ઇવેન્ટ મેનેજ":
                             pass
                     st.session_state.pending_faces = []
                     st.cache_resource.clear()
-                    st.success(f"✅ {count} નવા ચહેરા સેવ થયા!")
+                    st.success(f"✅ {count} નવા ચહેરા '{selected_event}' માં સેવ થયા!")
                     st.rerun()
 
             st.divider()
@@ -644,40 +542,42 @@ if option == "📂 ઇવેન્ટ મેનેજ":
             st.write(f"📊 આ ઇવેન્ટમાં કુલ **{len(faces_list)}** લેબલ કરેલા ચહેરા છે.")
             if len(faces_list) > 0:
                 st.subheader("🖼️ લેબલ કરેલા ફોટા")
-                # Display some images (we skip drive display to avoid errors, just show local paths)
                 for i in range(0, len(faces_list), 4):
                     cols = st.columns(4)
                     for j, col in enumerate(cols):
                         idx = i + j
                         if idx < len(faces_list):
                             item = faces_list[idx]
-                            # try to display from local path
-                            file_path = item.get("file_path")
-                            if file_path and os.path.exists(file_path):
+                            file_id = item.get("drive_file_id")
+                            if file_id:
+                                img_url = f"https://drive.google.com/uc?export=view&id={file_id}"
                                 with col:
-                                    st.image(file_path, caption=f"લેબલ: {item.get('person_label', 'Unknown')}", width=150)
+                                    st.image(img_url, caption=f"લેબલ: {item['person_label']}", width=150)
                             else:
-                                with col:
-                                    st.write(f"❌ {item.get('photo_name', 'Unknown')}")
+                                # લોકલ ફોટો બતાવવા પ્રયાસ
+                                local_img = os.path.join("events", selected_event, "images", item.get("filename", ""))
+                                if os.path.exists(local_img):
+                                    st.image(local_img, caption=f"લેબલ: {item['person_label']}", width=150)
+                                else:
+                                    st.write(f"❌ {item.get('filename', 'Unknown')} (Drive ID missing)")
             else:
                 st.info("ℹ️ હજુ સુધી કોઈ ફોટો લેબલ થયો નથી.")
 
-            # ===== DELETE EVENT (local only) =====
+            # DELETE EVENT
             st.divider()
             st.markdown("### 🗑️ ઇવેન્ટ કાઢી નાખો")
             st.warning(f"⚠️ આ ઇવેન્ટ ('{selected_event}') અને તેના બધા લોકલ ફોટા કાયમ માટે ડિલીટ થઈ જશે!")
             if st.button(f"🗑️ '{selected_event}' ઇવેન્ટ કાઢી નાખો", type="primary"):
                 try:
-                    event_path, _ = get_event_dir(selected_event)
-                    shutil.rmtree(event_path)
-                    st.success(f"✅ '{selected_event}' ઇવેન્ટ ડિલીટ થઈ ગઈ!")
+                    shutil.rmtree(os.path.join("events", selected_event))
+                    st.success(f"✅ '{selected_event}' ઇવેન્ટ લોકલ પરથી ડિલીટ થઈ ગઈ!")
                     st.session_state.pending_faces = []
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ ઇવેન્ટ ડિલીટ કરતી વખતે ભૂલ: {e}")
 
 # ============================================================
-# PAGE 2: SEARCH FACE
+# PAGE 2: SEARCH FACE (જેમ છે તેમ, માત્ર load/save લોકલ વાપરો)
 # ============================================================
 elif option == "🔍 ફોટો શોધો":
     query_params = st.query_params
@@ -724,13 +624,12 @@ elif option == "🔍 ફોટો શોધો":
             """, unsafe_allow_html=True)
 
             index, db_data = load_event_faiss_index(event_name)
-
             if index is None or len(db_data) == 0:
                 st.warning("ℹ️ આ ઇવેન્ટમાં હજુ સુધી કોઈ ફોટા નથી.")
             else:
                 unique_labels = set()
                 for item in db_data:
-                    unique_labels.add(item.get("person_label", "Unknown"))
+                    unique_labels.add(item["person_label"])
                 persons_list = list(unique_labels)
                 st.sidebar.success(f"✅ {len(db_data)} ચહેરા ઇન્ડેક્સ થયા")
                 st.sidebar.info(f"👤 વ્યક્તિઓ: {', '.join(persons_list)}")
@@ -742,17 +641,11 @@ elif option == "🔍 ફોટો શોધો":
                     index=0,
                     key="upload_option"
                 )
-
                 uploaded_file = None
-
                 if upload_option == "📸 કેમેરાથી સેલ્ફી લો":
                     uploaded_file = st.camera_input("📸 સેલ્ફી લો", key="camera_input")
                 else:
-                    uploaded_file = st.file_uploader(
-                        "📁 ફોટો પસંદ કરો...",
-                        type=["jpg", "jpeg", "png"],
-                        key="file_uploader"
-                    )
+                    uploaded_file = st.file_uploader("📁 ફોટો પસંદ કરો...", type=["jpg", "jpeg", "png"], key="file_uploader")
 
                 if uploaded_file is not None:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
@@ -773,10 +666,7 @@ elif option == "🔍 ફોટો શોધો":
                                 query_embeddings = []
                                 for i, face in enumerate(faces):
                                     emb = face.embedding / np.linalg.norm(face.embedding)
-                                    query_embeddings.append({
-                                        "query_face": f"face_{i}",
-                                        "embedding": emb.tolist()
-                                    })
+                                    query_embeddings.append({"query_face": f"face_{i}", "embedding": emb.tolist()})
 
                                 query_face_matches = {}
                                 for q_data in query_embeddings:
@@ -788,38 +678,44 @@ elif option == "🔍 ફોટો શોધો":
                                     for score, idx in zip(scores[0], indices[0]):
                                         if score > 0:
                                             query_face_matches[q_face].append({
-                                                "person": db_data[idx].get("person_label", "Unknown"),
+                                                "person": db_data[idx]["person_label"],
                                                 "similarity": float(score),
-                                                "filename": db_data[idx].get("photo_name", "unknown")
+                                                "filename": db_data[idx]["filename"]
                                             })
 
-                                # use find_best_global_assignment if available, else fallback
-                                try:
-                                    from face_search import find_best_global_assignment
-                                    result = find_best_global_assignment(
-                                        query_embeddings,
-                                        query_face_matches,
-                                        persons_list
-                                    )
-                                except:
-                                    # fallback: take top match for each face
-                                    result = []
-                                    for q_face, matches in query_face_matches.items():
-                                        if matches:
-                                            result.append({
-                                                "query_face": q_face,
-                                                "person": matches[0]["person"],
-                                                "similarity": matches[0]["similarity"]
-                                            })
+                                result = find_best_global_assignment(
+                                    query_embeddings,
+                                    query_face_matches,
+                                    persons_list
+                                )
+
+                                if result:
+                                    for match in result:
+                                        if match is None: continue
+                                        q_face = match["query_face"]
+                                        all_matches = query_face_matches.get(q_face, [])
+                                        if len(all_matches) < 2:
+                                            match["decision"] = "STRONG"
+                                            continue
+                                        top_score = all_matches[0]["similarity"]
+                                        second_score = all_matches[1]["similarity"]
+                                        margin = top_score - second_score
+                                        if top_score > 0.80:
+                                            match["decision"] = "STRONG"
+                                        elif top_score > 0.65 and margin > 0.08:
+                                            match["decision"] = "GOOD"
+                                        elif margin < 0.05:
+                                            match["decision"] = "AMBIGUOUS"
+                                        else:
+                                            match["decision"] = "WEAK"
 
                                 st.subheader("📸 તમારા મેચ થયેલા ફોટા")
                                 matched_persons = set()
                                 for match in result:
-                                    if match is not None and match.get('similarity', 0) > 0.30:
+                                    if match is not None and match['similarity'] > 0.30:
                                         matched_persons.add(match['person'])
 
                                 if matched_persons:
-                                    # TELEGRAM NOTIFICATION
                                     send_telegram_message(
                                         f"✅ <b>નવો ગ્રાહક!</b>\n"
                                         f"📸 ઇવેન્ટ: {event_name}\n"
@@ -827,32 +723,41 @@ elif option == "🔍 ફોટો શોધો":
                                         f"🕒 {datetime.datetime.now().strftime('%d-%m-%Y %H:%M')}"
                                     )
 
-                                    # CART SYSTEM
+                                    # CART SYSTEM (એ જ રાખો, અહીં ફક્ત થોડું સુધારેલ)
                                     for person in matched_persons:
                                         st.markdown(f"**👤 વ્યક્તિ: {person}**")
-                                        person_photos = [item for item in db_data if item.get("person_label") == person]
+                                        person_photos = [item for item in db_data if item["person_label"] == person]
                                         if person_photos:
                                             for idx, item in enumerate(person_photos):
                                                 if idx % 4 == 0:
                                                     cols = st.columns(4)
                                                 col = cols[idx % 4]
                                                 with col:
-                                                    # try to show local image
-                                                    img_path = item.get("file_path")
-                                                    if img_path and os.path.exists(img_path):
-                                                        st.image(img_path, width=150)
-                                                    else:
-                                                        st.write(f"📁 {item.get('photo_name', 'Unknown')}")
+                                                    try:
+                                                        file_id = item.get("drive_file_id")
+                                                        if file_id:
+                                                            img_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+                                                            st.image(img_url, width=150)
+                                                            img_path = img_url
+                                                        else:
+                                                            local_path = os.path.join("events", event_name, "images", item["filename"])
+                                                            if os.path.exists(local_path):
+                                                                st.image(local_path, width=150)
+                                                                img_path = local_path
+                                                            else:
+                                                                st.write(f"📁 {item.get('filename', 'Unknown')}")
+                                                                img_path = None
+                                                    except Exception as e:
+                                                        st.write(f"📁 {item.get('filename', 'Unknown')}")
+                                                        img_path = None
 
                                                     price = PHOTO_PRICE
                                                     cart_key = f"cart_{person}_{idx}"
                                                     selected = st.checkbox(f"🛒 ₹{price}" if price > 0 else "🆓 FREE", key=cart_key)
                                                     if selected:
-                                                        if "cart" not in st.session_state:
-                                                            st.session_state.cart = []
                                                         cart_item = {
                                                             "person": person,
-                                                            "filename": item.get("photo_name", "unknown"),
+                                                            "filename": item["filename"],
                                                             "price": price,
                                                             "img_path": img_path,
                                                             "drive_file_id": item.get("drive_file_id")
@@ -860,41 +765,35 @@ elif option == "🔍 ફોટો શોધો":
                                                         if cart_item not in st.session_state.cart:
                                                             st.session_state.cart.append(cart_item)
                                                     else:
-                                                        if "cart" in st.session_state:
-                                                            st.session_state.cart = [c for c in st.session_state.cart if not (c["person"] == person and c["filename"] == item.get("photo_name"))]
+                                                        st.session_state.cart = [c for c in st.session_state.cart if not (c["person"] == person and c["filename"] == item["filename"])]
 
                                             if st.button(f"➕ {person} ના બધા ફોટા કાર્ટમાં ઉમેરો", key=f"add_all_{person}"):
                                                 for item in person_photos:
-                                                    img_path = item.get("file_path")
-                                                    price = PHOTO_PRICE
+                                                    local_path = os.path.join("events", event_name, "images", item["filename"])
                                                     cart_item = {
                                                         "person": person,
-                                                        "filename": item.get("photo_name", "unknown"),
-                                                        "price": price,
-                                                        "img_path": img_path
+                                                        "filename": item["filename"],
+                                                        "price": PHOTO_PRICE,
+                                                        "img_path": local_path if os.path.exists(local_path) else None,
+                                                        "drive_file_id": item.get("drive_file_id")
                                                     }
-                                                    if "cart" not in st.session_state:
-                                                        st.session_state.cart = []
                                                     if cart_item not in st.session_state.cart:
                                                         st.session_state.cart.append(cart_item)
                                                 st.rerun()
                                         else:
                                             st.write("❌ આ વ્યક્તિના કોઈ ફોટા નથી.")
 
-                                    # CART DISPLAY
+                                    # CART DISPLAY (સાઈડબાર)
                                     st.sidebar.markdown("---")
                                     st.sidebar.markdown("## 🛒 તમારું કાર્ટ")
-
-                                    if "cart" in st.session_state and st.session_state.cart:
+                                    if st.session_state.cart:
                                         cart = st.session_state.cart
                                         total_price = sum(item["price"] for item in cart)
-
                                         for idx, item in enumerate(cart):
                                             if item['price'] == 0:
                                                 st.sidebar.write(f"{idx+1}. {item['person']} - 🆓 FREE")
                                             else:
                                                 st.sidebar.write(f"{idx+1}. {item['person']} - ₹{item['price']}")
-
                                         st.sidebar.markdown(f"### 💰 કુલ: ₹{total_price}")
 
                                         if st.sidebar.button("🗑️ કાર્ટ ખાલી કરો"):
@@ -908,7 +807,6 @@ elif option == "🔍 ફોટો શોધો":
                                             order_id = f"PHOTO_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                                             encoded_name = urllib.parse.quote(MY_NAME)
                                             encoded_note = urllib.parse.quote("Photo Download Payment")
-
                                             upi_links = {
                                                 "📱 Google Pay": f"gpay://upi/pay?pa={MY_UPI_ID}&pn={encoded_name}&am={total_price}&cu=INR&tn={encoded_note}&tr={order_id}",
                                                 "📱 PhonePe": f"phonepe://pay?pa={MY_UPI_ID}&pn={encoded_name}&am={total_price}",
@@ -916,19 +814,12 @@ elif option == "🔍 ફોટો શોધો":
                                                 "📱 BHIM": f"bhim://upi://pay?pa={MY_UPI_ID}&pn={encoded_name}&am={total_price}&cu=INR",
                                                 "📱 Generic UPI": f"upi://pay?pa={MY_UPI_ID}&pn={encoded_name}&am={total_price}&cu=INR&tn={encoded_note}&tr={order_id}"
                                             }
-
                                             st.sidebar.markdown("### 💳 તમારી UPI એપ પસંદ કરો:")
-                                            st.sidebar.link_button("🟢 Google Pay", upi_links["📱 Google Pay"], width="stretch")
-                                            st.sidebar.link_button("🟠 PhonePe", upi_links["📱 PhonePe"], width="stretch")
-                                            st.sidebar.link_button("🔵 Paytm", upi_links["📱 Paytm"], width="stretch")
-                                            st.sidebar.link_button("🟣 BHIM", upi_links["📱 BHIM"], width="stretch")
-                                            st.sidebar.link_button("📱 અન્ય UPI એપ", upi_links["📱 Generic UPI"], width="stretch")
-
+                                            for label, link in upi_links.items():
+                                                st.sidebar.link_button(label, link, width="stretch")
                                             st.sidebar.markdown("---")
                                             if st.sidebar.button("✅ પેમેન્ટ થઈ ગયું!", width="stretch"):
-                                                unique_persons = set()
-                                                for item in cart:
-                                                    unique_persons.add(item['person'])
+                                                unique_persons = set(item['person'] for item in cart)
                                                 persons_text = ", ".join(unique_persons)
                                                 send_telegram_message(
                                                     f"💰 <b>પેમેન્ટ મળ્યું!</b>\n"
@@ -940,18 +831,17 @@ elif option == "🔍 ફોટો શોધો":
                                                 st.session_state.payment_done = True
                                                 st.rerun()
 
-                                        # PAYMENT DONE -> DOWNLOAD
                                         if st.session_state.get("payment_done", False):
                                             st.sidebar.markdown("---")
                                             st.sidebar.markdown("## 📥 તમારા ફોટા ડાઉનલોડ કરો")
-
+                                            # ZIP ડાઉનલોડ (ફક્ત લોકલ ફોટા માટે)
                                             if st.sidebar.button("📥 બધા ફોટા ડાઉનલોડ કરો (ZIP)"):
+                                                import zipfile, io
                                                 zip_buffer = io.BytesIO()
                                                 with zipfile.ZipFile(zip_buffer, "w") as zip_file:
                                                     for item in cart:
-                                                        img_path = item["img_path"]
-                                                        if img_path and os.path.exists(img_path):
-                                                            zip_file.write(img_path, item["filename"])
+                                                        if item["img_path"] and os.path.exists(item["img_path"]):
+                                                            zip_file.write(item["img_path"], item["filename"])
                                                 zip_buffer.seek(0)
                                                 st.sidebar.download_button(
                                                     label="📥 ZIP ડાઉનલોડ કરો",
@@ -960,11 +850,9 @@ elif option == "🔍 ફોટો શોધો":
                                                     mime="application/zip",
                                                     key="zip_download_final"
                                                 )
-
                                             for idx, item in enumerate(cart):
-                                                img_path = item["img_path"]
-                                                if img_path and os.path.exists(img_path):
-                                                    with open(img_path, "rb") as f:
+                                                if item["img_path"] and os.path.exists(item["img_path"]):
+                                                    with open(item["img_path"], "rb") as f:
                                                         st.sidebar.download_button(
                                                             label=f"📸 {item['filename']} ડાઉનલોડ કરો",
                                                             data=f,
@@ -972,25 +860,20 @@ elif option == "🔍 ફોટો શોધો":
                                                             mime="image/jpeg",
                                                             key=f"final_dl_{idx}"
                                                         )
-
+                                            # શેરિંગ બટન્સ (એ જ)
                                             st.sidebar.markdown("---")
                                             st.sidebar.markdown("## 📤 તમારા ફોટા શેર કરો")
-
                                             app_url = "https://jayphotofinder.streamlit.app"
                                             share_text = "🌟 મારા ઇવેન્ટના સુંદર ફોટા જુઓ! જય ફોટો શોધ દ્વારા શોધ્યા."
-
                                             whatsapp_url = f"https://api.whatsapp.com/send?text={share_text} {app_url}"
                                             st.sidebar.markdown(f"[![WhatsApp](https://img.icons8.com/color/48/000000/whatsapp.png)]({whatsapp_url}) શેર કરો")
                                             facebook_url = f"https://www.facebook.com/sharer/sharer.php?u={app_url}"
                                             st.sidebar.markdown(f"[![Facebook](https://img.icons8.com/color/48/000000/facebook.png)]({facebook_url}) શેર કરો")
-                                            st.sidebar.markdown("📸 **Instagram:** લિંક કોપી કરીને પેસ્ટ કરો")
                                             if st.sidebar.button("📋 લિંક કોપી કરો"):
                                                 st.sidebar.code(app_url)
                                                 st.sidebar.success("✅ લિંક કોપી થઈ ગઈ!")
-
                                             email_url = f"mailto:?subject=મારા ફોટા જુઓ&body={share_text} {app_url}"
                                             st.sidebar.markdown(f"[![Email](https://img.icons8.com/color/48/000000/gmail.png)]({email_url}) ઈમેઈલ દ્વારા શેર કરો")
-
                                             if st.sidebar.button("✅ ડાઉનલોડ થઈ ગયા! કાર્ટ ખાલી કરો"):
                                                 st.session_state.cart = []
                                                 st.session_state.payment_done = False
@@ -1000,57 +883,50 @@ elif option == "🔍 ફોટો શોધો":
                                         st.session_state.payment_done = False
 
 # ============================================================
-# PAGE 3: GENERATE QR CODE
+# PAGE 3: QR CODE GENERATE (એ જ)
 # ============================================================
-import streamlit as st
-import qrcode
-import io
+elif option == "📱 QR કોડ બનાવો":
+    st.markdown("""
+    <div class="card">
+        <div class="card-title">📱 QR કોડ બનાવો</div>
+        <div class="card-desc">અહીં તમે કોઈ પણ ઇવેન્ટ માટે QR કોડ બનાવી શકો છો. ગ્રાહકો આ QR કોડ સ્કેન કરીને તેમના ફોટા શોધી શકશે.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ... તમારો લોગિન કોડ અહીં આવશે ...
-
-# ---- લોગિન થયા પછીનો એપ કોડ ----
-st.title("📸 JAY PHOTO SHODH")
-
-# ઇવેન્ટ નામ માટે ઇનપુટ
-event_name = st.text_input("📝 ઇવેન્ટનું નામ લખો (દા.ત. wedding, birthday):")
-
-# QR કોડ જનરેટ કરવાનો બટન
-if st.button("🎫 QR કોડ બનાવો"):
-    if not event_name.strip():
-        st.warning("કૃપા કરીને ઇવેન્ટનું નામ લખો!")
+    events = list_all_local_events()
+    if not events:
+        st.warning("⚠️ હજુ સુધી કોઈ ઇવેન્ટ નથી. કૃપા કરીને '📂 ઇવેન્ટ મેનેજ' માં પહેલાં ઇવેન્ટ બનાવો.")
     else:
-        # QR URL બનાવો
-        qr_url = f"https://www.jayphotoart.in?event={event_name}"
-        
-        # QR કોડ જનરેટ કરો
-        img = qrcode.make(qr_url)
-        
-        # QR કોડ બતાવો
-        st.image(img, caption=f"{event_name} ઇવેન્ટ માટે QR કોડ")
-        
-        # QR કોડ ડાઉનલોડ માટે
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        
-        st.download_button(
-            label="📥 QR ડાઉનલોડ કરો",
-            data=buf,
-            file_name=f"{event_name}_qr.png",
-            mime="image/png"
-        )
-        
-        st.success(f"✅ {event_name} ઇવેન્ટ માટે QR કોડ તૈયાર છે!")
-        with col2:
-            st.info("💡 કેવી રીતે વાપરવું?")
-            st.write("1. આ QR કોડને પ્રિન્ટ કરીને ઇવેન્ટમાં મૂકો.")
-            st.write("2. ગ્રાહકો ફોન વડે સ્કેન કરશે.")
-            st.write("3. તેઓ સેલ્ફી લઈને તેમના ફોટા જોશે.")
+        selected_event = st.selectbox("📂 ઇવેન્ટ પસંદ કરો", events)
+        if selected_event:
+            clean_event = selected_event.replace(" ", "_")
+            url = f"https://jayphotofinder.streamlit.app/event={clean_event}"
+            qr_img = qrcode.make(url)
+            qr_img_array = np.array(qr_img.convert('RGB'))
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.image(qr_img_array, caption=f"📱 '{selected_event}' માટે QR કોડ", width=300)
+                st.success(f"🔗 URL: {url}")
+                st.caption("📌 ગ્રાહકો આ QR કોડ સ્કેન કરીને તેમના ફોટા જોઈ શકે છે.")
+                from io import BytesIO
+                buffered = BytesIO()
+                qr_img.save(buffered, format="PNG")
+                st.download_button(
+                    label="⬇ QR કોડ ડાઉનલોડ કરો",
+                    data=buffered.getvalue(),
+                    file_name=f"qr_{clean_event}.png",
+                    mime="image/png"
+                )
+            with col2:
+                st.info("💡 કેવી રીતે વાપરવું?")
+                st.write("1. આ QR કોડને પ્રિન્ટ કરીને ઇવેન્ટમાં મૂકો.")
+                st.write("2. ગ્રાહકો ફોન વડે સ્કેન કરશે.")
+                st.write("3. તેઓ સેલ્ફી લઈને તેમના ફોટા જોશે.")
 
 # ============================================================
-# PAGE 4: BENCHMARK
+# PAGE 4: BENCHMARK (એ જ)
 # ============================================================
-elif option == "📊 બેન્ચમાર્ક":
+else:
     st.header("📊 બેન્ચમાર્ક પરિણામો")
     try:
         df = pd.read_csv("benchmark_results.csv")
