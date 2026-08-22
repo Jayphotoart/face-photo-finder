@@ -390,26 +390,38 @@ option = st.sidebar.selectbox(
     format_func=lambda x: x
 )
 
-# ============================================================
-# PASSWORD PROTECTION
-# ============================================================
+import streamlit as st
+
+# પાસવર્ડને secrets.toml થી લો
+PASSWORD = st.secrets.get("PASSWORD", "JayPhotoArt@2026")
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
 def check_password():
-    if st.session_state.get("authenticated", False):
+    if st.session_state.authenticated:
         return True
 
-    st.sidebar.markdown("---")
-    password = st.sidebar.text_input("🔒 એડમિન પાસવર્ડ:", type="password", key="admin_pass")
-
+    st.sidebar.title("🔒 લોગિન")
+    password = st.sidebar.text_input("પાસવર્ડ", type="password", key="admin_pass")
     if password:
-        if password.strip() == "JayPhotoArt@2026":
+        if password == PASSWORD:
             st.session_state.authenticated = True
-            st.sidebar.success("✅ પ્રવેશ મળ્યો!")
+            st.sidebar.success("✅ સફળતા!")
             st.rerun()
             return True
         else:
             st.sidebar.error("❌ ખોટો પાસવર્ડ!")
             return False
     return False
+
+# ---- એપ શરૂ થાય છે ----
+if not check_password():
+    st.stop()  # લોગિન ન થાય ત્યાં સુધી અટકાવો
+
+# ---- એપનો મૂળ કોડ ----
+st.title("📸 JAY PHOTO SHODH")
+st.write("AI POWERED PHOTO SEARCH")
 
 # ============================================================
 # TELEGRAM BOT
